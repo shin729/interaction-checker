@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>薬剤間相互作用チェッカー</title>
+<style>
+  body { font-family: "Segoe UI", "Hiragino Kaku Gothic ProN", Meiryo, sans-serif;
+         max-width: 760px; margin: 2rem auto; padding: 0 1rem; color: #222; }
+  h1 { font-size: 1.4rem; }
+  form { display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center; margin: 1.5rem 0; }
+  input[type=text] { padding: 0.5rem; font-size: 1rem; flex: 1; min-width: 160px; }
+  button { padding: 0.5rem 1.2rem; font-size: 1rem; cursor: pointer; }
+  .error { color: #b00020; background: #fde8e8; padding: 0.7rem 1rem; border-radius: 6px; }
+  .verdict { display: inline-block; padding: 0.4rem 1rem; border-radius: 6px;
+             font-size: 1.3rem; font-weight: bold; color: #fff; }
+  .level-強 { background: #c0392b; }
+  .level-中 { background: #e67e22; }
+  .level-弱 { background: #d4ac0d; color: #333; }
+  .level-記載なし { background: #7f8c8d; }
+  .reason { color: #555; margin-top: 0.4rem; }
+  .evidence-item { border: 1px solid #ddd; border-radius: 8px; padding: 0.8rem 1rem; margin: 0.7rem 0; }
+  .evidence-label { font-weight: bold; }
+  .evidence-summary { margin: 0.3rem 0; }
+  details summary { cursor: pointer; color: #1a5fb4; }
+  details .detail-text { font-size: 0.9rem; line-height: 1.7; background: #f7f7f7;
+                          padding: 0.7rem 0.9rem; border-radius: 6px; margin-top: 0.4rem;
+                          white-space: normal; word-break: normal; overflow-wrap: anywhere; }
+  .note { font-size: 0.8rem; color: #888; margin-top: 2rem; }
+  .badge-numeric { font-size: 0.75rem; background: #eef; color: #335; border-radius: 4px; padding: 0.1rem 0.4rem; margin-left: 0.4rem; }
+  .mechanism-tag { display: inline-block; padding: 0.25rem 0.6rem; margin-left: 0.4rem;
+                   border-radius: 999px; font-size: 0.8rem; font-weight: bold;
+                   background: #eaf2fb; color: #1a5fb4; border: 1px solid #cfe0f5; }
+  .mechanism-disclaimer { font-size: 0.72rem; color: #999; margin-left: 0.4rem; cursor: help;
+                          border-bottom: 1px dotted #bbb; }
+
+  .pk-section { background: #fff8e6; border: 1px solid #f0d68a; border-radius: 10px;
+                padding: 1rem 1.2rem; margin: 1.2rem 0; }
+  .pk-section h3 { margin-top: 0; }
+  .pk-item { background: #fff; border: 1px solid #eee; border-radius: 8px; padding: 0.7rem 0.9rem; margin: 0.6rem 0; }
+  .pk-source { font-size: 0.8rem; color: #888; }
+  .pk-chips { margin: 0.4rem 0; display: flex; flex-wrap: wrap; gap: 0.4rem; }
+  .pk-chip { display: inline-block; padding: 0.25rem 0.7rem; border-radius: 999px;
+             font-weight: bold; font-size: 0.95rem; color: #fff; }
+  .pk-up { background: #c0392b; }
+  .pk-down { background: #2471a3; }
+  .pk-flat { background: #7f8c8d; }
+  .pk-sentence { font-size: 0.88rem; line-height: 1.7; color: #444; white-space: normal; overflow-wrap: anywhere; }
+</style>
+</head>
+<body>
+  <h1>💊 薬剤間相互作用チェッカー</h1>
+  <p>2つの薬剤名（一般名）を入力すると、添付文書とopenFDA(FAERS)実報告データから相互作用の強さと根拠を表示します。</p>
+
+  <form method="post">
+    <input type="text" id="drug_a" name="drug_a" list="drug_a_list" placeholder="例: ワルファリン" value="{{ query_a }}" autocomplete="off" required>
+    <datalist id="drug_a_list"></datalist>
+    <span>×</span>
+    <input type="text" id="drug_b" name="drug_b" list="drug_b_list" placeholder="例: クラリスロマイシン" value="{{ query_b }}" autocomplete="off" required>
+    <datalist id="drug_b_list"></datalist>
+    <button type="submit">相互作用をチェック</button>
+  </form>
+
+  <script>
+    (function () {
+      function setupSuggest(inputId, listId) {
+        var input = document.getElementById(inputId);
+        var datalist = document.getElementById(listId);
+        var timer = null;
+        input.addEventListener("input", function () {
+          var q = input.value.trim();
+          if (timer) clearTimeout(timer);
+          if (q.length < 3) {
+            datalist.innerHTML = "";
+            return;
+          }
+          timer = setTimeout(function () {
+            fetch("/suggest?q=" + encodeURIComponent(q))
+              .then(function (res) { return res.json(); })
+              .then(function (names) {
+                datalist.innerHTML = "";
+                names.forEach(function (name) {
+                  var opt = document.createElement("option");
+                  opt.value = name;
+                  datalist.appendChild(opt);
+                });
+              })
+              .catch(function () { datalist.innerHTML = ""; });
+          }, 400);
+        });
+      }
+      setupSuggest("drug_a", "drug_a_list");
+      setupSuggest("drug_b", "drug_b_list");
+    })();
+  </script>
+
+  {% if error %}
+    <p class="error">{{ error }}</p>
+  {% endif %}
+
+  {% if result %}
+    <h2>{{ result.name_a }} × {{ result.name_b }}</h2>
+    <p>
+      <span class="verdict level-{{ result.verdict.level }}">{{ result.verdict.level }}</span>
+      {% for m in result.verdict.mechanisms %}
+        <span class="mechanism-tag">{{ m }}</span>
+      {% endfor %}
+      {% if result.verdict.mechanisms %}
+        <span class="mechanism-disclaimer" title="添付文書中の関連記載を自動抽出した推定情報です。隣接する別の薬剤の記載を誤って拾うなど、実際の機序と異なる場合があります">(自動抽出・参考情報)</span>
+      {% endif %}
+      <br>
+      <span class="reason">{{ result.verdict.reason }}</span>
+    </p>
+
+    {% if result.fda_name_missing %}
+      <p class="error">openFDA併用報告データは、薬剤名の英語名対応表(drug_name_map.json)に
+      未登録のため取得できませんでした（判定は添付文書情報のみに基づきます）。</p>
+    {% endif %}
+
+    <div class="pk-section">
+      <h3>📊 薬物動態への影響（血中濃度・AUC等の数値変化）</h3>
+      <p style="font-size:0.85rem; color:#777; margin-top:-0.3rem;">
+        併用時にCmax・AUC・クリアランス等が「具体的にどれくらい変化するか」は添付文書に記載が少なく、
+        書籍でも探しにくいため、添付文書中の数値言及を横断的に拾い出して表示しています。
+      </p>
+      {% if result.pk_changes %}
+        {% for item in result.pk_changes %}
+          <div class="pk-item">
+            <div class="pk-source">添付文書（{{ item.source }}）より</div>
+            <div class="pk-chips">
+              {% for c in item.changes %}
+                <span class="pk-chip {{ 'pk-up' if c.direction in ('上昇','増加','増強','延長') else ('pk-down' if c.direction in ('低下','減少','減弱','短縮') else 'pk-flat') }}">
+                  {{ c.metric }} {{ c.value_label }} {{ c.direction }}
+                </span>
+              {% endfor %}
+            </div>
+            <div class="pk-sentence">{{ item.sentence }}</div>
+          </div>
+        {% endfor %}
+      {% else %}
+        <p>この組み合わせについては、添付文書中に血中濃度・AUC等の具体的な数値変化の記載が見つかりませんでした
+        （記載が無いことは「影響が無い」ことを意味しません。今後PubMed等の研究データの統合を予定しています）。</p>
+      {% endif %}
+    </div>
+
+    <h3>根拠（優先順位順）</h3>
+    {% if result.evidence %}
+      {% for item in result.evidence %}
+        <div class="evidence-item">
+          <div class="evidence-label">
+            {{ loop.index }}. {{ item.label }}
+            {% if item.numeric %}<span class="badge-numeric">数値根拠</span>{% endif %}
+          </div>
+          <div class="evidence-summary">{{ item.summary }}</div>
+          {% if item.detail %}
+            <details>
+              <summary>添付文書の該当箇所を表示</summary>
+              <div class="detail-text">{{ item.detail }}</div>
+            </details>
+          {% endif %}
+        </div>
+      {% endfor %}
+    {% else %}
+      <p>添付文書・openFDAいずれにも明確な根拠は見つかりませんでした。</p>
+    {% endif %}
+
+    <p class="note">
+      ※ openFDA(FAERS)は米国の自発報告データベースであり、日本国内の使用実態・報告傾向とは異なります。<br>
+      ※ 添付文書は「報告・検討された組み合わせ」のみを列挙するため、記載が無い＝安全を意味しません。<br>
+      ※ 本ツールは医療従事者の判断を代替するものではありません。実際の処方判断は医師・薬剤師にご相談ください。
+    </p>
+  {% endif %}
+</body>
+</html>
