@@ -72,6 +72,24 @@ def _build_evidence(pmda_a, pmda_b, query_a, query_b, fda_stats):
             "numeric": True,
         })
 
+    if fda_stats and fda_stats.get("ror") is not None:
+        lo, hi = fda_stats["ror_ci_low"], fda_stats["ror_ci_high"]
+        if lo > 1:
+            interp = "各剤単独の報告頻度から期待される水準より有意に多く併用報告されています（信頼区間の下限>1）。"
+        else:
+            interp = "信頼区間の下限が1を下回るため、統計的に有意な偏りとは言えません。"
+        items.append({
+            "priority": 2,
+            "label": "openFDA(FAERS) 併用報告の不均衡（ROR・報告オッズ比）",
+            "summary": f"併用報告{fda_stats['co_reports_total']:,}件。"
+                       f"独立を仮定した期待併用報告数{fda_stats['expected_co']:,.1f}件に対し、"
+                       f"ROR {fda_stats['ror']:.1f}（95%CI {lo:.1f}–{hi:.1f}）。{interp} "
+                       f"※RORは相互作用だけでなく「併用処方の多さ」も反映するため、"
+                       f"高ROR＝相互作用が強い、と短絡できない点にご注意ください。",
+            "detail": None,
+            "numeric": True,
+        })
+
     for label_name, info, other_query, other_name in (
         (pmda_a.get("matched_name") or query_a, pmda_a, query_b, pmda_b.get("matched_name") or query_b),
         (pmda_b.get("matched_name") or query_b, pmda_b, query_a, pmda_a.get("matched_name") or query_a),

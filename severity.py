@@ -34,7 +34,14 @@ _SALT_SUFFIX_RE = re.compile(
     r"ナトリウム|カリウム|カルシウム|水和物|無水物)+$"
 )
 
-_OPENFDA_DEATH_THRESHOLD = 20
+# ROR(報告オッズ比)による弱シグナル判定の閾値。
+#   - CI下限 > 1 で「偶然より有意に多く併用報告されている」とみなす
+#   - ただし少数例ではRORが暴れるため、最低併用報告数(MIN_CASES)も課す
+# 旧実装は「死亡20件以上」という絶対数だったが、頻用薬ほど無条件に超えてしまう
+# 問題があったため、使用頻度の影響を補正するRORに置き換えた（死亡件数は重症度の
+# 補足情報としてreasonに残す）。閾値は暫定値で、正解セットでの検証後に調整する。
+_OPENFDA_ROR_CI_LOW = 1.0
+_OPENFDA_MIN_CASES = 3
 _OPENFDA_SIGNAL_TERMS = ("DRUG INTERACTION", "TOXICITY TO VARIOUS AGENTS")
 
 _COMBO_SUFFIX_RE = re.compile(r"配合剤?$")
@@ -86,13 +93,31 @@ def _text_mentions(text, *names) -> bool:
 
 
 def _openfda_signal(fda_stats):
+    """openFDA併用報告から弱シグナルの有無を判定する。
+
+    シグナル成立条件（いずれか）:
+      (1) RORのCI下限 > 1 かつ 併用報告数 >= MIN_CASES
+          ＝使用頻度を補正してもなお有意に多く併用報告されている
+      (2) 頻出有害事象に「DRUG INTERACTION」等の機序語が出現
+          ＝報告者が相互作用そのものを事象として挙げている
+
+    戻り値: シグナルの根拠を説明する辞書（無ければ None）
+    """
     if not fda_stats or not fda_stats.get("co_reports_total"):
         return None
+    total = fda_stats.get("co_reports_total", 0)
     death = fda_stats.get("co_reports_death", 0)
+    ror = fda_stats.get("ror")
+    ci_low = fda_stats.get("ror_ci_low")
     terms = {t for t, _ in fda_stats.get("top_reactions", [])}
     hit_terms = [t for t in _OPENFDA_SIGNAL_TERMS if t in terms]
-    if death >= _OPENFDA_DEATH_THRESHOLD or hit_terms:
-        return death, hit_terms
+
+    ror_signal = (
+        ci_low is not None and ci_low > _OPENFDA_ROR_CI_LOW and total >= _OPENFDA_MIN_CASES
+    )
+    if ror_signal or hit_terms:
+        return {"ror": ror, "ci_low": ci_low, "ci_high": fda_stats.get("ror_ci_high"),
+                "ror_signal": ror_signal, "death": death, "total": total, "hit_terms": hit_terms}
     return None
 
 
@@ -125,16 +150,22 @@ def classify(pmda_a: dict, pmda_b: dict, query_a: str, query_b: str, fda_stats: 
 
     signal = _openfda_signal(fda_stats)
     if signal:
-        death, hit_terms = signal
         parts = []
-        if death >= _OPENFDA_DEATH_THRESHOLD:
-            parts.append(f"死亡転帰{death}件")
-        if hit_terms:
-            parts.append("頻出事象に" + "・".join(hit_terms))
+        if signal["ror_signal"]:
+            parts.append(
+                f"併用報告が期待値より有意に多い（ROR {signal['ror']:.1f}, "
+                f"95%CI {signal['ci_low']:.1f}–{signal['ci_high']:.1f}）"
+            )
+        if signal["hit_terms"]:
+            parts.append("頻出事象に" + "・".join(signal["hit_terms"]))
+        if signal["death"]:
+            parts.append(f"うち死亡転帰{signal['death']}件")
         return {
             "level": "弱",
             "reason": "添付文書に直接記載はないが、openFDA(FAERS)併用報告で"
-                      + "・".join(parts) + "（添付文書未記載の実世界シグナル）",
+                      + "、".join(parts)
+                      + "（添付文書未記載の実世界シグナル。RORは相互作用だけでなく"
+                        "併用処方の多さも反映する点に注意）",
         }
 
     return {"level": "記載なし", "reason": "添付文書・openFDA併用報告のいずれにも有意な記載/シグナルが見当たらない"
@@ -152,7 +183,8 @@ if __name__ == "__main__":
     ]
     for qa, qb in pairs:
         pa, pb = pmda_lookup.lookup(qa), pmda_lookup.lookup(qb)
-        fda = openfda_lookup.lookup_pair(qa, qb)
+        fda = openfda_lookup.lookup_pair(
+            qa, pa.get("matched_name") or qa, qb, pb.get("matched_name") or qb)
         result = classify(pa, pb, qa, qb, fda)
         print(f"\n=== {qa} × {qb} ===")
         print(f"  添付文書: {pa['matched_name']} / {pb['matched_name']}")
