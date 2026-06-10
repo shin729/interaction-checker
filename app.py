@@ -26,16 +26,27 @@ def _build_pk_changes(pmda_a, pmda_b, query_a, query_b):
 
     添付文書では「具体的にどれくらい変化するか」の記載が少なく、書籍等でも
     横断的に探しにくいため、本ツールではこれを最優先で見やすく提示する。
+
+    各剤の添文に並ぶ「他の薬剤との相互作用」を無差別に拾うと、いま調べている
+    ペアと無関係な第三の薬剤の数値まで出てしまうため、相手剤名（中核名・配合成分名を
+    含む）を含む文だけに絞り込む。
     """
+    name_a = pmda_a.get("matched_name") or query_a
+    name_b = pmda_b.get("matched_name") or query_b
     items = []
-    for label_name, info in (
-        (pmda_a.get("matched_name") or query_a, pmda_a),
-        (pmda_b.get("matched_name") or query_b, pmda_b),
+    for label_name, info, other_query, other_name in (
+        (name_a, pmda_a, query_b, name_b),
+        (name_b, pmda_b, query_a, name_a),
     ):
+        partner_names = set()
+        for n in severity._expand_names(other_query, other_name):
+            partner_names.add(n)
+            partner_names.add(severity._name_core(n))
         for entry in pk_numbers.extract_all(
             info.get("pk_interactions"),
             info.get("caution_combinations"),
             info.get("contraindicated_combinations"),
+            partner_names=partner_names,
         ):
             items.append({
                 "source": label_name,

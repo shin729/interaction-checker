@@ -90,12 +90,28 @@ def extract(text: str):
     return results
 
 
-def extract_all(*texts):
-    """複数のテキスト（pk_interactions / caution_combinations 等）から重複なく抽出する"""
+def _mentions(sentence: str, names) -> bool:
+    """文(sentence)に names のいずれかが含まれるか。PDF抽出由来の空白は無視して照合する。"""
+    s = sentence.replace(" ", "").replace("　", "")
+    return any(n and len(n) >= 2 and n.replace(" ", "") in s for n in names)
+
+
+def extract_all(*texts, partner_names=None):
+    """複数のテキスト（pk_interactions / caution_combinations 等）から重複なく抽出する。
+
+    partner_names を渡すと、相手剤名（その中核名・配合成分名を含む）を含む文だけに絞る。
+    添付文書の相互作用欄は薬剤ごとに記載が並ぶため、フィルタしないと「いま調べている
+    ペアとは無関係な第三の薬剤（例: アムロジピン×ジルチアゼムを調べているのに、
+    アムロジピン添文中のシンバスタチンとの相互作用）」の数値まで拾ってしまう。
+    相手剤名が同じ文に出現しない数値は、ペアの相互作用とは言い切れないため除外する
+    （取りこぼすより、無関係な数値を相互作用として誤提示しない方を優先する設計）。
+    """
     seen = set()
     merged = []
     for text in texts:
         for item in extract(text):
+            if partner_names and not _mentions(item["sentence"], partner_names):
+                continue
             if item["sentence"] in seen:
                 continue
             seen.add(item["sentence"])
