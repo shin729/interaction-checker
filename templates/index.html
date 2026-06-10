@@ -47,6 +47,14 @@
   .pk-flat { background: #7f8c8d; }
   .pk-chip.pk-wide { opacity: 0.6; font-weight: normal; }
   .pk-sentence { font-size: 0.88rem; line-height: 1.7; color: #444; white-space: normal; overflow-wrap: anywhere; }
+  .alt-section { margin: 1.2rem 0; }
+  .alt-intro { font-size: 0.85rem; color: #666; margin: 0.2rem 0; }
+  .alt-box { margin: 0.4rem 0; }
+  .alt-box summary { cursor: pointer; color: #1a5fb4; font-size: 0.9rem; }
+  .alt-chips { display: flex; flex-wrap: wrap; gap: 0.4rem; margin: 0.5rem 0 0.2rem; }
+  .alt-chip { padding: 0.3rem 0.8rem; border: 1px solid #cfe0f5; background: #eaf2fb; color: #1a5fb4;
+              border-radius: 999px; font-size: 0.85rem; cursor: pointer; }
+  .alt-chip:hover { background: #d6e6fa; }
 </style>
 </head>
 <body>
@@ -93,6 +101,14 @@
       setupSuggest("drug_a", "drug_a_list");
       setupSuggest("drug_b", "drug_b_list");
     })();
+
+    // 「同じ系統の薬」チップ: 片方の薬剤を置き換えて（もう片方は維持）再検索する
+    function swapSearch(which, value) {
+      var id = which === "a" ? "drug_a" : "drug_b";
+      var input = document.getElementById(id);
+      input.value = value;
+      input.form.submit();
+    }
   </script>
 
   {% if error %}
@@ -144,6 +160,32 @@
         （記載が無いことは「影響が無い」ことを意味しません。今後PubMed等の研究データの統合を予定しています）。</p>
       {% endif %}
     </div>
+
+    {% if result.alt_a or result.alt_b %}
+      <div class="alt-section">
+        <p class="alt-intro">🔁 数値データが少ないときは、同じ系統の別の薬でも調べてみてください（クリックで置き換えて再検索）。</p>
+        {% if result.alt_a %}
+          <details class="alt-box">
+            <summary>{{ result.name_a }} と同じ系統：{{ result.alt_a.label }}（{{ result.alt_a.members|length }}件）</summary>
+            <div class="alt-chips">
+              {% for m in result.alt_a.members %}
+                <button type="button" class="alt-chip" onclick="swapSearch('a', '{{ m }}')">{{ m }}</button>
+              {% endfor %}
+            </div>
+          </details>
+        {% endif %}
+        {% if result.alt_b %}
+          <details class="alt-box">
+            <summary>{{ result.name_b }} と同じ系統：{{ result.alt_b.label }}（{{ result.alt_b.members|length }}件）</summary>
+            <div class="alt-chips">
+              {% for m in result.alt_b.members %}
+                <button type="button" class="alt-chip" onclick="swapSearch('b', '{{ m }}')">{{ m }}</button>
+              {% endfor %}
+            </div>
+          </details>
+        {% endif %}
+      </div>
+    {% endif %}
 
     <h3>根拠（優先順位順）</h3>
     {% if result.evidence %}

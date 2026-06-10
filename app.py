@@ -11,6 +11,7 @@ PubMed/CYP分類表の統合は今後の拡張（project_interaction_checker.md�
 """
 from flask import Flask, jsonify, render_template, request
 
+import alternatives
 import mechanism
 import openfda_lookup
 import pk_numbers
@@ -233,6 +234,10 @@ def index():
                     evidence = _build_evidence(pmda_a, pmda_b, query_a, query_b, fda_stats)
                     pk_changes = _build_pk_changes(pmda_a, pmda_b, query_a, query_b)
 
+                    # 同じ薬効系統の別の薬（調べ直し候補）。相手剤は除外する。
+                    alt_a = alternatives.find_alternatives(pmda_a["matched_name"], exclude=(pmda_b["matched_name"],))
+                    alt_b = alternatives.find_alternatives(pmda_b["matched_name"], exclude=(pmda_a["matched_name"],))
+
                     result = {
                         "name_a": pmda_a["matched_name"],
                         "name_b": pmda_b["matched_name"],
@@ -241,6 +246,8 @@ def index():
                         "pk_changes": pk_changes,
                         "fda_stats": fda_stats,
                         "fda_name_missing": fda_stats is None,
+                        "alt_a": alt_a,
+                        "alt_b": alt_b,
                     }
 
     return render_template(
