@@ -28,6 +28,8 @@
      "category": "注意", "rationale": "P-糖蛋白阻害でジゴキシン中毒リスク。併用注意。"},
     {"a": "リバーロキサバン", "b": "クラリスロマイシン", "expected_level": "中", "expect_pk": true,
      "category": "注意+PK", "rationale": "CYP3A4/P-gp阻害で抗凝固作用増強・出血リスク。16.7にAUC1.5倍/Cmax1.4倍の数値あり。"},
+    {"a": "炭酸リチウム", "b": "イブプロフェン", "expected_level": "中", "expect_pk": false,
+     "category": "注意(漢字名/検索選択)", "rationale": "NSAIDsはリチウムクリアランスを低下させリチウム中毒リスク。漢字名の検索・照合の回帰テストを兼ねる。かつ前方一致検索が派生薬『イブプロフェンピコノール』を誤選択しない（完全一致優先）ことの回帰ガード。"},
 
     {"a": "メトホルミン", "b": "シタグリプチン", "expected_level": "記載なし", "expect_pk": false,
      "category": "安全併用(偽陽性ガード)",

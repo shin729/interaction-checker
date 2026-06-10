@@ -17,6 +17,7 @@ import requests
 from bs4 import BeautifulSoup
 
 import pk_numbers
+import severity
 from parse_tenpu import parse as parse_interactions
 
 BASE = "https://www.pmda.go.jp"
@@ -106,6 +107,30 @@ def _general_list_links(html: str):
     return links
 
 
+def _select_link(query: str, links):
+    """前方一致検索の候補から、検索意図に最も合うものを選ぶ。
+
+    単純に先頭(links[0])を採ると、目的の基本薬より派生薬が選ばれることがある
+    （例:「イブプロフェン」検索で先頭に外用薬「イブプロフェンピコノール」が来て、
+    本来2番目の「イブプロフェン」を取り逃す）。優先順位:
+      ① クエリと完全一致する候補
+      ② 中核名(塩・水和物等を除いた名)がクエリの中核名と一致する候補
+         （「アムロジピン」検索→「アムロジピンベシル酸塩」を拾う）
+      ③ いずれも無ければ従来どおり先頭（先発品名→一般名の解決などはこれで動く）
+    ※ピコノール等のエステルは中核名で別薬扱い（_name_coreが落とさない）ため、
+      ②でも誤って派生薬を拾わない。"""
+    if not links:
+        return None
+    for name, url in links:
+        if name == query:
+            return name, url
+    qcore = severity._name_core(query)
+    for name, url in links:
+        if severity._name_core(name) == qcore:
+            return name, url
+    return links[0]
+
+
 def _detail_pdf_links(session: requests.Session, detail_url: str):
     """詳細ページから添付文書PDFとインタビューフォーム(IF)PDFのURLを返す。
 
@@ -173,7 +198,7 @@ def lookup(drug_name: str, use_cache: bool = True) -> dict:
             cache_file.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
             return result
 
-        matched_name, detail_url = links[0]
+        matched_name, detail_url = _select_link(drug_name, links)
         pdf_url, if_pdf_url = _detail_pdf_links(session, detail_url)
         result.update(matched_name=matched_name, detail_url=detail_url, pdf_url=pdf_url,
                       if_pdf_url=if_pdf_url, found=True)
@@ -220,13 +245,15 @@ def suggest(prefix: str, limit: int = 8, use_cache: bool = True) -> list:
         html = _submit_search(session, prefix)
         links = _general_list_links(html)
 
-    seen, names = set(), []
+    seen, uniq = set(), []
     for text, _ in links:
         if text not in seen:
             seen.add(text)
-            names.append(text)
-        if len(names) >= limit:
-            break
+            uniq.append(text)
+    # 基本薬を派生薬より上に: 入力と完全一致を最優先、次に短い名前順
+    # （例「イブプロフェン」で外用薬「イブプロフェンピコノール」より基本薬を上げる）
+    uniq.sort(key=lambda t: (t != prefix, len(t)))
+    names = uniq[:limit]
 
     cache_file.write_text(json.dumps(names, ensure_ascii=False, indent=2), encoding="utf-8")
     time.sleep(1)  # PMDAサーバへの負荷軽減（連続アクセス時のマナー）
