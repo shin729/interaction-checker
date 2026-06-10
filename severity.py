@@ -148,6 +148,22 @@ def classify(pmda_a: dict, pmda_b: dict, query_a: str, query_b: str, fda_stats: 
         return {"level": "中", "reason": "添付文書の「併用注意」に相手剤の記載あり",
                 "mechanism_text": caution_b, "mechanism_names": names_a}
 
+    # 「16.7 薬物相互作用」セクションも判定根拠に使う。ここは併用禁忌/併用注意の
+    # 根拠となるPKデータが載る節で、相手剤名があれば薬物動態学的相互作用が文書化
+    # されている＝併用注意相当(中)とみなす。特に旧書式の多段組PDFでは、相手剤が
+    # 10.2併用注意から参照されていてもPyMuPDFの抽出順が乱れて併用注意ブロックに
+    # 入らないことがあり(例: スボレキサント×ジルチアゼム)、16.7は連続ブロックで
+    # 取れるためここを見ないと「PK欄に数値が出ているのに判定は記載なし」という
+    # 不整合が起きる。具体的な変化量(AUC何倍等)はPK欄に別途数値表示される。
+    pk_a = pmda_a.get("pk_interactions")
+    pk_b = pmda_b.get("pk_interactions")
+    if _text_mentions(pk_a, *names_b):
+        return {"level": "中", "reason": "添付文書の「薬物相互作用(16.7)」に相手剤との薬物動態学的相互作用の記載あり",
+                "mechanism_text": pk_a, "mechanism_names": names_b}
+    if _text_mentions(pk_b, *names_a):
+        return {"level": "中", "reason": "添付文書の「薬物相互作用(16.7)」に相手剤との薬物動態学的相互作用の記載あり",
+                "mechanism_text": pk_b, "mechanism_names": names_a}
+
     signal = _openfda_signal(fda_stats)
     if signal:
         parts = []

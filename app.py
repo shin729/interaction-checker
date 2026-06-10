@@ -117,12 +117,28 @@ def _build_evidence(pmda_a, pmda_b, query_a, query_b, fda_stats):
             })
 
         caution = info.get("caution_combinations")
+        mentioned_in_block = False
         if caution and severity._text_mentions(caution, *other_names):
+            mentioned_in_block = True
             items.append({
                 "priority": 4,
                 "label": f"添付文書（{label_name}）の「併用注意」",
                 "summary": f"{other_name}が併用注意として記載されています。",
                 "detail": text_format.reflow(caution),
+                "numeric": False,
+            })
+
+        # 16.7 薬物相互作用セクションの記載。併用禁忌/注意ブロックに既に相手剤が
+        # 出ている場合は重複になるので追加しない（旧書式PDFで抽出順が乱れ、注意
+        # ブロックに入らず16.7だけに相手剤が出るケースを根拠欄に反映するのが主目的）。
+        pk_text = info.get("pk_interactions")
+        if not mentioned_in_block and pk_text and severity._text_mentions(pk_text, *other_names):
+            items.append({
+                "priority": 4,
+                "label": f"添付文書（{label_name}）の「薬物相互作用(16.7)」",
+                "summary": f"{other_name}との薬物動態学的相互作用が記載されています"
+                           f"（具体的な変化量は上の「薬物動態への影響」を参照）。",
+                "detail": text_format.reflow(pk_text),
                 "numeric": False,
             })
 
