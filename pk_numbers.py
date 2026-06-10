@@ -26,6 +26,15 @@ _UNIT_DIR_RE = r"(倍|[%％])(?:程度|に|まで)?(上昇|増加|増強|低下|
 
 _PAIR_RE = re.compile(rf"{_METRIC_RE}{_CONNECT_RE}{_RANGE_RE}{_UNIT_DIR_RE}")
 
+# 「Cmax及びAUCは22%及び105%増加」のように、指標を2つ並べてから数値を2つ
+# まとめて書く形式（旧書式の添付文書に多い）。metric1↔num1、metric2↔num2 を
+# 順番で対応づける。方向(増加/減少等)は両指標に共通で末尾に1度だけ書かれる。
+_PAIRED_RE = re.compile(
+    rf"{_METRIC_RE}(?:及び|並びに|、){_METRIC_RE}{_CONNECT_RE}"
+    rf"({_NUM_RE})(倍|[%％])(?:及び|並びに|、)({_NUM_RE})(倍|[%％])?"
+    rf"(?:程度|に|まで)?(上昇|増加|増強|低下|減少|減弱|延長|短縮)?"
+)
+
 _ZEN2HAN = str.maketrans("０１２３４５６７８９．", "0123456789.")
 
 
@@ -47,6 +56,21 @@ def _normalize_metric(m: str) -> str:
     return m
 
 
+def _make_change(metric, value, unit, direction, value_max=None) -> dict:
+    unit = unit.translate(str.maketrans("％", "%"))
+    v = _to_float(value)
+    v_max = _to_float(value_max) if value_max else None
+    return {
+        "metric": _normalize_metric(metric),
+        "value": v,
+        "value_max": v_max,
+        "unit": unit,
+        "direction": direction,
+        # 単一値「1.26倍」/ 範囲「X〜Y倍」のどちらでも表示できるラベル
+        "value_label": f"{_fmt_num(v)}〜{_fmt_num(v_max)}{unit}" if v_max is not None else f"{_fmt_num(v)}{unit}",
+    }
+
+
 def extract(text: str):
     """
     テキストから定量的なPK変化の言及を文単位で抽出する。
@@ -63,21 +87,24 @@ def extract(text: str):
         sentence = re.sub(r"\s+", " ", sentence).strip()
         if not sentence:
             continue
-        changes = []
-        for m in _PAIR_RE.finditer(sentence.replace(" ", "")):
+        ns = sentence.replace(" ", "")
+        collected = []  # (出現位置, change) ― 最後に位置順に並べ替えて文中の語順を保つ
+        consumed = []   # _PAIRED_RE が消費した区間。単一パターンの二重マッチを防ぐ
+        # ① 「Cmax及びAUCは22%及び105%増加」形式（指標2つ＋数値2つ）を先に拾う
+        for m in _PAIRED_RE.finditer(ns):
+            m1, m2, n1, u1, n2, u2, direction = m.groups()
+            u2 = u2 or u1  # 2つ目に単位が無ければ1つ目を流用（「22%及び105%」等）
+            collected.append((m.start(), _make_change(m1, n1, u1, direction)))
+            collected.append((m.start() + 1, _make_change(m2, n2, u2, direction)))
+            consumed.append(m.span())
+        # ② 「Cmaxで1.26倍」形式（指標→数値が隣接）。①が消費した区間は除外する
+        for m in _PAIR_RE.finditer(ns):
+            if any(s <= m.start() < e for s, e in consumed):
+                continue
             metric, value, value_max, unit, direction = m.groups()
-            unit = unit.translate(str.maketrans("％", "%"))
-            v = _to_float(value)
-            v_max = _to_float(value_max) if value_max else None
-            changes.append({
-                "metric": _normalize_metric(metric),
-                "value": v,
-                "value_max": v_max,
-                "unit": unit,
-                "direction": direction,
-                # 単一値「1.26倍」/ 範囲「X〜Y倍」のどちらでも表示できるラベル
-                "value_label": f"{_fmt_num(v)}〜{_fmt_num(v_max)}{unit}" if v_max is not None else f"{_fmt_num(v)}{unit}",
-            })
+            collected.append((m.start(), _make_change(metric, value, unit, direction, value_max)))
+        collected.sort(key=lambda x: x[0])
+        changes = [c for _, c in collected]
         # 「Cmaxで1.26倍、AUCで1.19倍上昇し」のように方向(上昇/低下等)が
         # 列挙の最後にしか書かれない場合、後続の値から方向を継承する
         for i in range(len(changes) - 2, -1, -1):

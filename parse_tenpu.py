@@ -37,7 +37,14 @@ OLD_FORMAT = {
     "end": r"\n[ \t　]*(?:副作用|薬物動態|臨床成績|薬効薬理|適用上の注意|取扱い上の注意)[ \t　]*\n",
 }
 
+# 新書式は「16.7 薬物相互作用」と番号付きだが、旧書式のPDFでは本文上に章番号が
+# 現れず「薬物相互作用」が単独見出しとして出る（例: スボレキサント/ベルソムラ）。
+# まず番号付きで探し、無ければ番号なしの単独見出しにフォールバックする。
 PK_INTERACTIONS = r"16\s*[\.．]\s*7\s*[\.．]?\s*薬\s*物\s*相\s*互\s*作\s*用"
+PK_INTERACTIONS_OLD = r"\n[ \t　]*薬\s*物\s*相\s*互\s*作\s*用[ \t　]*\n"
+# 旧書式の「薬物相互作用」節の終端候補（次に来る大見出し）
+PK_END_OLD = r"\n[ \t　]*(?:臨\s*床\s*成\s*績|有効性及び安全性|薬\s*効\s*薬\s*理|" \
+             r"薬\s*物\s*動\s*態|副\s*作\s*用|取扱い上の注意|包\s*装)[ \t　]*\n"
 
 
 def _search(pattern, text, start=0):
@@ -108,6 +115,13 @@ def parse(text: str) -> dict:
         end = _search(NEW_FORMAT["end"], text, pk[1]) or _search(OLD_FORMAT["end"], text, pk[1])
         pk_end = end[0] if end else pk[0] + 4000
         pk_block = text[pk[0]:pk_end].strip()
+    else:
+        # 旧書式: 番号なしの「薬物相互作用」見出しでフォールバック
+        pk_old = _search(PK_INTERACTIONS_OLD, text)
+        if pk_old:
+            end = _search(PK_END_OLD, text, pk_old[1])
+            pk_end = end[0] if end else pk_old[1] + 4000
+            pk_block = text[pk_old[0]:pk_end].strip()
 
     result["format"] = fmt_name
     result["pk_interactions"] = pk_block
