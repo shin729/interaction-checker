@@ -30,6 +30,10 @@ def _build_pk_changes(pmda_a, pmda_b, query_a, query_b):
     各剤の添文に並ぶ「他の薬剤との相互作用」を無差別に拾うと、いま調べている
     ペアと無関係な第三の薬剤の数値まで出てしまうため、相手剤名（中核名・配合成分名を
     含む）を含む文だけに絞り込む。
+
+    添付文書に加え、インタビューフォーム(IF)から抽出済みの数値(if_pk_items)も
+    相手剤フィルタして併合する。IFは添付文書より詳細な相互作用試験データを載せるため
+    数値の網羅が増える。同じ数値（指標+値+方向が一致）は添付文書を優先して重複排除する。
     """
     name_a = pmda_a.get("matched_name") or query_a
     name_b = pmda_b.get("matched_name") or query_b
@@ -42,16 +46,44 @@ def _build_pk_changes(pmda_a, pmda_b, query_a, query_b):
         for n in severity._expand_names(other_query, other_name):
             partner_names.add(n)
             partner_names.add(severity._name_core(n))
+
+        seen_sigs = set()
+
+        def _norm_dir(d):
+            # 添付文書「増加/減少」とIF「上昇/低下」は同義。重複排除のため粗い向きに正規化する
+            if d in ("上昇", "増加", "増強", "延長"):
+                return "up"
+            if d in ("低下", "減少", "減弱", "短縮"):
+                return "down"
+            return "flat"
+
+        def _sig(changes):
+            return frozenset((c["metric"], c["value_label"], _norm_dir(c["direction"])) for c in changes)
+
+        # ① 添付文書（16.7・併用注意・併用禁忌）
         for entry in pk_numbers.extract_all(
             info.get("pk_interactions"),
             info.get("caution_combinations"),
             info.get("contraindicated_combinations"),
             partner_names=partner_names,
         ):
+            seen_sigs.add(_sig(entry["changes"]))
             items.append({
-                "source": label_name,
-                "changes": entry["changes"],
-                "sentence": entry["sentence"],
+                "source": label_name, "source_type": "添付文書",
+                "changes": entry["changes"], "sentence": entry["sentence"],
+            })
+
+        # ② インタビューフォーム（相手剤フィルタ＋添付文書と重複する数値は除外）
+        for entry in (info.get("if_pk_items") or []):
+            if not pk_numbers._mentions(entry["sentence"], partner_names):
+                continue
+            sig = _sig(entry["changes"])
+            if sig in seen_sigs:
+                continue
+            seen_sigs.add(sig)
+            items.append({
+                "source": label_name, "source_type": "インタビューフォーム",
+                "changes": entry["changes"], "sentence": entry["sentence"],
             })
     return items
 

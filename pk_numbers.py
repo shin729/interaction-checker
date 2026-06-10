@@ -16,24 +16,32 @@
 """
 import re
 
-_METRIC_RE = r"(Cmax|AUC(?:[0-9\-–〜~]*)?|Tmax|t\s*1\s*/\s*2|半減期|血中濃度|血漿中濃度|血清中濃度|クリアランス|CL)"
+# AUCは「AUC0-∞」「AUC0-t」「AUCτ」等の下付き表記を伴う（特にインタビューフォーム）。
+# 下付き部分に ∞・t・τ・inf も許容する。
+_METRIC_RE = r"(Cmax|AUC(?:[0-9\-–〜~tτ∞]|inf|∞)*|Tmax|t\s*1\s*/\s*2|半減期|血中濃度|血漿中濃度|血清中濃度|クリアランス|CL)"
 _NUM_RE = r"[0-9０-９]+(?:[.．][0-9０-９]+)?"
 # 「1.26倍」のような単一値だけでなく「X〜Y倍」のような範囲表記も拾う
 # （添付文書には単一値が無く範囲のみ記載のケースがあるため、ユーザー要望で対応）
 _RANGE_RE = rf"({_NUM_RE})(?:\s*[～〜~\-–]\s*({_NUM_RE}))?"
 _CONNECT_RE = r"[はがでにと、・約]{0,4}"
+# ペア形式の接続部は「は、それぞれ」「は各々」等が入るため、それぞれ/各々も許容する
+_PAIRED_CONNECT_RE = r"(?:それぞれ|各々|[はがでにと、・約]){0,8}"
 _UNIT_DIR_RE = r"(倍|[%％])(?:程度|に|まで)?(上昇|増加|増強|低下|減少|減弱|延長|短縮)?"
 
 _PAIR_RE = re.compile(rf"{_METRIC_RE}{_CONNECT_RE}{_RANGE_RE}{_UNIT_DIR_RE}")
 
-# 「Cmax及びAUCは22%及び105%増加」のように、指標を2つ並べてから数値を2つ
-# まとめて書く形式（旧書式の添付文書に多い）。metric1↔num1、metric2↔num2 を
-# 順番で対応づける。方向(増加/減少等)は両指標に共通で末尾に1度だけ書かれる。
+# 「Cmax及びAUCは22%及び105%増加」「Cmax及びAUCは、それぞれ22%及び105%上昇」のように、
+# 指標を2つ並べてから数値を2つまとめて書く形式（旧書式の添付文書・IFに多い）。
+# metric1↔num1、metric2↔num2 を順番で対応づける。方向は両指標に共通で末尾に1度だけ。
 _PAIRED_RE = re.compile(
-    rf"{_METRIC_RE}(?:及び|並びに|、){_METRIC_RE}{_CONNECT_RE}"
+    rf"{_METRIC_RE}(?:及び|並びに|、){_METRIC_RE}{_PAIRED_CONNECT_RE}"
     rf"({_NUM_RE})(倍|[%％])(?:及び|並びに|、)({_NUM_RE})(倍|[%％])?"
     rf"(?:程度|に|まで)?(上昇|増加|増強|低下|減少|減弱|延長|短縮)?"
 )
+
+# 範囲表記の上限/下限比がこの値以上なら「広すぎて現場判断に使いにくい」低信頼とみなす
+# （例: 1〜10倍=比10は弾く。1.5〜2.2倍=比約1.5は通常表示）。ユーザー要望に基づく。
+_WIDE_RANGE_RATIO = 3.0
 
 _ZEN2HAN = str.maketrans("０１２３４５６７８９．", "0123456789.")
 
@@ -60,12 +68,15 @@ def _make_change(metric, value, unit, direction, value_max=None) -> dict:
     unit = unit.translate(str.maketrans("％", "%"))
     v = _to_float(value)
     v_max = _to_float(value_max) if value_max else None
+    # 範囲が広すぎる（上限/下限比が_WIDE_RANGE_RATIO以上）と現場判断に使えないため低信頼フラグ
+    wide = v_max is not None and v > 0 and (v_max / v) >= _WIDE_RANGE_RATIO
     return {
         "metric": _normalize_metric(metric),
         "value": v,
         "value_max": v_max,
         "unit": unit,
         "direction": direction,
+        "wide": wide,
         # 単一値「1.26倍」/ 範囲「X〜Y倍」のどちらでも表示できるラベル
         "value_label": f"{_fmt_num(v)}〜{_fmt_num(v_max)}{unit}" if v_max is not None else f"{_fmt_num(v)}{unit}",
     }

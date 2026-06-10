@@ -45,6 +45,7 @@
   .pk-up { background: #c0392b; }
   .pk-down { background: #2471a3; }
   .pk-flat { background: #7f8c8d; }
+  .pk-chip.pk-wide { opacity: 0.6; font-weight: normal; }
   .pk-sentence { font-size: 0.88rem; line-height: 1.7; color: #444; white-space: normal; overflow-wrap: anywhere; }
 </style>
 </head>
@@ -126,11 +127,12 @@
       {% if result.pk_changes %}
         {% for item in result.pk_changes %}
           <div class="pk-item">
-            <div class="pk-source">添付文書（{{ item.source }}）より</div>
+            <div class="pk-source">{{ item.source_type or '添付文書' }}（{{ item.source }}）より</div>
             <div class="pk-chips">
               {% for c in item.changes %}
-                <span class="pk-chip {{ 'pk-up' if c.direction in ('上昇','増加','増強','延長') else ('pk-down' if c.direction in ('低下','減少','減弱','短縮') else 'pk-flat') }}">
-                  {{ c.metric }} {{ c.value_label }} {{ c.direction }}
+                <span class="pk-chip {{ 'pk-up' if c.direction in ('上昇','増加','増強','延長') else ('pk-down' if c.direction in ('低下','減少','減弱','短縮') else 'pk-flat') }}{{ ' pk-wide' if c.wide }}"
+                      {% if c.wide %}title="範囲が広く（上限/下限が3倍以上）、具体的な程度の参考にはしにくい数値です"{% endif %}>
+                  {{ c.metric }} {{ c.value_label }} {{ c.direction }}{% if c.wide %} ⚠範囲広{% endif %}
                 </span>
               {% endfor %}
             </div>

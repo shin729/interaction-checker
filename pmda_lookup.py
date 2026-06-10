@@ -16,6 +16,7 @@ import fitz  # PyMuPDF
 import requests
 from bs4 import BeautifulSoup
 
+import pk_numbers
 from parse_tenpu import parse as parse_interactions
 
 BASE = "https://www.pmda.go.jp"
@@ -105,15 +106,24 @@ def _general_list_links(html: str):
     return links
 
 
-def _first_pdf_link(session: requests.Session, detail_url: str):
+def _detail_pdf_links(session: requests.Session, detail_url: str):
+    """詳細ページから添付文書PDFとインタビューフォーム(IF)PDFのURLを返す。
+
+    添付文書は URL に "resultdatasetpdf"、IFは "/interview/" を含むのが目印。
+    IFは添付文書より詳細な薬物相互作用試験データ（AUC/Cmaxの数値）を載せるため、
+    「程度の具体性」を補う第2のソースとして使う。"""
     r = session.get(detail_url, headers={**HEADERS, "Referer": SEARCH_URL}, timeout=30)
     r.raise_for_status()
     soup = BeautifulSoup(r.text, "lxml")
+    tenpu, interview = None, None
     for a in soup.find_all("a", href=True):
         full = requests.compat.urljoin(detail_url, a["href"])
-        if "resultdatasetpdf" in full.lower():
-            return full
-    return None
+        low = full.lower()
+        if tenpu is None and "resultdatasetpdf" in low:
+            tenpu = full
+        if interview is None and "/interview/" in low:
+            interview = full
+    return tenpu, interview
 
 
 def _pdf_text(session: requests.Session, pdf_url: str, referer: str) -> str:
@@ -140,6 +150,8 @@ def lookup(drug_name: str, use_cache: bool = True) -> dict:
         "contraindicated_combinations": str | None,
         "caution_combinations": str | None,
         "pk_interactions": str | None,
+        "if_pdf_url": str | None,           # インタビューフォームPDFのURL
+        "if_pk_items": [ {"sentence", "changes"}, ... ],  # IFから抽出したPK数値文
         "found": bool,
       }
     """
@@ -151,7 +163,7 @@ def lookup(drug_name: str, use_cache: bool = True) -> dict:
         "query": drug_name, "matched_name": None, "detail_url": None, "pdf_url": None,
         "format": "unknown", "interactions_section": None,
         "contraindicated_combinations": None, "caution_combinations": None,
-        "pk_interactions": None, "found": False,
+        "pk_interactions": None, "if_pdf_url": None, "if_pk_items": [], "found": False,
     }
 
     with requests.Session() as session:
@@ -162,12 +174,21 @@ def lookup(drug_name: str, use_cache: bool = True) -> dict:
             return result
 
         matched_name, detail_url = links[0]
-        pdf_url = _first_pdf_link(session, detail_url)
-        result.update(matched_name=matched_name, detail_url=detail_url, pdf_url=pdf_url, found=True)
+        pdf_url, if_pdf_url = _detail_pdf_links(session, detail_url)
+        result.update(matched_name=matched_name, detail_url=detail_url, pdf_url=pdf_url,
+                      if_pdf_url=if_pdf_url, found=True)
         if pdf_url:
             text = _pdf_text(session, pdf_url, detail_url)
             parsed = parse_interactions(text)
             result.update(parsed)
+        # インタビューフォームから定量的PK数値を補完抽出する（任意・失敗時はスキップ）。
+        # 相手剤に依存しない全PK文を保存し、照合（相手剤フィルタ）はapp側で行う。
+        if if_pdf_url:
+            try:
+                if_text = _pdf_text(session, if_pdf_url, detail_url)
+                result["if_pk_items"] = pk_numbers.extract(if_text)
+            except Exception:
+                result["if_pk_items"] = []
 
     cache_file.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
     time.sleep(1)  # PMDAサーバへの負荷軽減（連続アクセス時のマナー）
