@@ -123,9 +123,55 @@ def extract(text: str):
                 changes[i]["direction"] = changes[i + 1]["direction"]
         for c in changes:
             c["direction"] = c["direction"] or "変化"
+            c["fda"] = _fda_auc_category(c)
         if changes:
             results.append({"sentence": sentence, "changes": changes})
     return results
+
+
+_UP_DIRS = ("上昇", "増加", "増強", "延長")
+_DOWN_DIRS = ("低下", "減少", "減弱", "短縮")
+
+
+def _fda_auc_category(c) -> str:
+    """AUCの変化量をFDA標準の相互作用の程度区分に翻訳する（AUC以外はNone）。
+
+    FDAは併用時のAUC倍率で阻害/誘導の強さを区分する:
+      阻害(増加)  強い=5倍以上 / 中等度=2〜5倍 / 弱い=1.25〜2倍
+      誘導(減少)  強い=80%以上減少 / 中等度=50〜80% / 弱い=20〜50%
+    範囲表記は安全側（増加は上限、減少は上限）で評価する。"""
+    if c["metric"] != "AUC":
+        return None
+    v = c["value_max"] if c["value_max"] is not None else c["value"]
+    unit, d = c["unit"], c["direction"]
+    # 倍率(fold)へ換算
+    if d in _UP_DIRS or d == "変化":
+        if unit == "倍":
+            fold = v
+        elif unit == "%":
+            fold = 1 + v / 100
+        else:
+            return None
+        if fold >= 5:
+            return "強い阻害相当(AUC5倍以上)"
+        if fold >= 2:
+            return "中等度阻害相当(AUC2〜5倍)"
+        if fold >= 1.25:
+            return "弱い阻害相当(AUC1.25〜2倍)"
+        return None
+    if d in _DOWN_DIRS:
+        # 減少率(%)へ換算（「0.5倍に低下」のような倍率表記にも対応）
+        dec = v if unit == "%" else (1 - v) * 100 if unit == "倍" and v < 1 else None
+        if dec is None:
+            return None
+        if dec >= 80:
+            return "強い誘導相当(AUC80%以上減少)"
+        if dec >= 50:
+            return "中等度誘導相当(AUC50〜80%減少)"
+        if dec >= 20:
+            return "弱い誘導相当(AUC20〜50%減少)"
+        return None
+    return None
 
 
 def _mentions(sentence: str, names) -> bool:
