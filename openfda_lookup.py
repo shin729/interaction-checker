@@ -13,6 +13,7 @@ drug_name_map.json の対応表を使う（未登録の薬剤は lookup_pair が
 None を返すので、呼び出し側が英語名を直接 co_report_stats に
 渡すか、対応表に追記して使う）。
 """
+import concurrent.futures
 import json
 import math
 import time
@@ -142,7 +143,7 @@ def _ror(co: int, solo_a: int, solo_b: int, n_total: int) -> dict:
     }
 
 
-def co_report_stats(drug_a_en: str, drug_b_en: str, use_cache: bool = True) -> dict:
+def co_report_stats(drug_a_en: str, drug_b_en: str, use_cache: bool = True, polite: bool = True) -> dict:
     """
     2剤の英語名(openFDA検索名)から、併用報告の件数・死亡/重篤割合を集計して返す。
 
@@ -168,13 +169,31 @@ def co_report_stats(drug_a_en: str, drug_b_en: str, use_cache: bool = True) -> d
 
     base_q = f'patient.drug.medicinalproduct:"{safe_a}"+AND+patient.drug.medicinalproduct:"{safe_b}"'
 
-    total = _total(base_q)
-    death = _total(f"{base_q}+AND+patient.reaction.reactionoutcome:5") if total else 0
-    serious = _total(f"{base_q}+AND+serious:1") if total else 0
-    solo_a = _total(f'patient.drug.medicinalproduct:"{safe_a}"')
-    solo_b = _total(f'patient.drug.medicinalproduct:"{safe_b}"')
-    top = _top_reactions(base_q) if total else []
-    ror = _ror(total, solo_a, solo_b, _db_total()) if total else None
+    # 6回のAPI呼び出しを逐次に投げると約7秒かかる。互いに独立なので並列化する。
+    # ラウンド1: 併用報告総数・各剤単独報告数（total>0かに依存しない3本）を同時取得。
+    # ラウンド2: 死亡/重篤/頻出事象（いずれもtotal>0のときだけ必要）を同時取得。
+    # この2ラウンド化で実効ラウンドトリップが6→2に減る。
+    with concurrent.futures.ThreadPoolExecutor(max_workers=3) as ex:
+        f_total = ex.submit(_total, base_q)
+        f_solo_a = ex.submit(_total, f'patient.drug.medicinalproduct:"{safe_a}"')
+        f_solo_b = ex.submit(_total, f'patient.drug.medicinalproduct:"{safe_b}"')
+        total = f_total.result()
+        solo_a = f_solo_a.result()
+        solo_b = f_solo_b.result()
+
+    if total:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=3) as ex:
+            f_death = ex.submit(_total, f"{base_q}+AND+patient.reaction.reactionoutcome:5")
+            f_serious = ex.submit(_total, f"{base_q}+AND+serious:1")
+            f_top = ex.submit(_top_reactions, base_q)
+            death = f_death.result()
+            serious = f_serious.result()
+            top = f_top.result()
+        ror = _ror(total, solo_a, solo_b, _db_total())
+    else:
+        death = serious = 0
+        top = []
+        ror = None
 
     result = {
         "drug_a": drug_a_en, "drug_b": drug_b_en,
@@ -193,7 +212,8 @@ def co_report_stats(drug_a_en: str, drug_b_en: str, use_cache: bool = True) -> d
         "obs_exp": ror["obs_exp"] if ror else None,
     }
     cache_file.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
-    time.sleep(0.5)  # openFDAサーバへの負荷軽減
+    if polite:
+        time.sleep(0.5)  # 連続バッチ実行時のopenFDAサーバ負荷軽減（対話リクエストではpolite=Falseで省く）
     return result
 
 
@@ -214,7 +234,8 @@ def _resolve_english(query: str, matched_name: str):
     return None
 
 
-def lookup_pair(query_a: str, matched_a: str, query_b: str, matched_b: str, use_cache: bool = True):
+def lookup_pair(query_a: str, matched_a: str, query_b: str, matched_b: str,
+                use_cache: bool = True, polite: bool = True):
     """日本語の薬剤名2つ(検索クエリと添付文書上の正式名)から
     openFDA併用報告統計を取得する高レベル関数。
     drug_name_map.json に対応する英語名が見つからない場合は None を返す。"""
@@ -222,7 +243,7 @@ def lookup_pair(query_a: str, matched_a: str, query_b: str, matched_b: str, use_
     en_b = _resolve_english(query_b, matched_b)
     if not en_a or not en_b:
         return None
-    return co_report_stats(en_a, en_b, use_cache=use_cache)
+    return co_report_stats(en_a, en_b, use_cache=use_cache, polite=polite)
 
 
 if __name__ == "__main__":

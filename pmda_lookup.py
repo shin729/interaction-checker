@@ -160,7 +160,7 @@ def _pdf_text(session: requests.Session, pdf_url: str, referer: str) -> str:
     return text
 
 
-def lookup(drug_name: str, use_cache: bool = True) -> dict:
+def lookup(drug_name: str, use_cache: bool = True, polite: bool = True) -> dict:
     """
     薬剤名(一般名/販売名の前方一致)から添付文書を検索し、相互作用情報を返す。
 
@@ -216,11 +216,12 @@ def lookup(drug_name: str, use_cache: bool = True) -> dict:
                 result["if_pk_items"] = []
 
     cache_file.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
-    time.sleep(1)  # PMDAサーバへの負荷軽減（連続アクセス時のマナー）
+    if polite:
+        time.sleep(1)  # 連続バッチ実行時のPMDA負荷軽減（対話リクエストではpolite=Falseで省く）
     return result
 
 
-def suggest(prefix: str, limit: int = 8, use_cache: bool = True) -> list:
+def suggest(prefix: str, limit: int = 8, use_cache: bool = True, polite: bool = True) -> list:
     """
     入力途中の薬剤名（3文字以上）から、PMDAの前方一致検索で候補名（一般名/販売名）を
     返す。入力補助（オートコンプリート）用。
@@ -256,7 +257,8 @@ def suggest(prefix: str, limit: int = 8, use_cache: bool = True) -> list:
     names = uniq[:limit]
 
     cache_file.write_text(json.dumps(names, ensure_ascii=False, indent=2), encoding="utf-8")
-    time.sleep(1)  # PMDAサーバへの負荷軽減（連続アクセス時のマナー）
+    if polite:
+        time.sleep(1)  # 連続バッチ実行時のPMDA負荷軽減（対話リクエストではpolite=Falseで省く）
     return names
 
 

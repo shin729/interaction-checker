@@ -9,6 +9,8 @@
 
 PubMed/CYP分類表の統合は今後の拡張（project_interaction_checker.md参照）。
 """
+import concurrent.futures
+
 from flask import Flask, jsonify, render_template, request
 
 import alternatives
@@ -185,7 +187,7 @@ def suggest():
     if len(q) < 3:
         return jsonify([])
     try:
-        names = pmda_lookup.suggest(q)
+        names = pmda_lookup.suggest(q, polite=False)
     except Exception:
         names = []
     return jsonify(names)
@@ -205,8 +207,13 @@ def index():
             error = "薬剤名を2つとも入力してください。"
         else:
             try:
-                pmda_a = pmda_lookup.lookup(query_a)
-                pmda_b = pmda_lookup.lookup(query_b)
+                # 2剤の添付文書取得は互いに独立。逐次だと1剤約6秒×2かかるため並列化する。
+                # 対話リクエストでは polite=False にして取得後の待機(sleep)を省く。
+                with concurrent.futures.ThreadPoolExecutor(max_workers=2) as ex:
+                    fut_a = ex.submit(pmda_lookup.lookup, query_a, use_cache=True, polite=False)
+                    fut_b = ex.submit(pmda_lookup.lookup, query_b, use_cache=True, polite=False)
+                    pmda_a = fut_a.result()
+                    pmda_b = fut_b.result()
             except Exception as e:
                 error = f"添付文書の検索中にエラーが発生しました: {e}"
                 pmda_a = pmda_b = None
@@ -221,6 +228,7 @@ def index():
                         fda_stats = openfda_lookup.lookup_pair(
                             query_a, pmda_a.get("matched_name") or query_a,
                             query_b, pmda_b.get("matched_name") or query_b,
+                            polite=False,
                         )
                     except Exception:
                         fda_stats = None
