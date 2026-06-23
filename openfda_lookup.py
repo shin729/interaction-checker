@@ -16,6 +16,7 @@ None を返すので、呼び出し側が英語名を直接 co_report_stats に
 import concurrent.futures
 import json
 import math
+import re
 import time
 import urllib.error
 import urllib.parse
@@ -217,30 +218,95 @@ def co_report_stats(drug_a_en: str, drug_b_en: str, use_cache: bool = True, poli
     return result
 
 
-def _resolve_english(query: str, matched_name: str):
+# 添付文書から推定した英語名（例 "Rosuvastatin Calcium"）は塩・水和物が付くことがある。
+# FAERSは中核INN名（rosuvastatin）での報告が多いので、末尾の対イオン塩・水和物語を
+# 落とした候補も作る。先頭にある語（"sodium bicarbonate"のsodium等）は名前の一部なので
+# 落とさない＝末尾一致のみ剥がす。
+_EN_SALT_RE = re.compile(
+    r"\s+(?:calcium|sodium|potassium|magnesium|zinc|"
+    r"hydrochloride|hydrobromide|hydroiodide|sulfate|sulphate|phosphate|nitrate|"
+    r"maleate|fumarate|succinate|tartrate|bitartrate|citrate|besilate|besylate|"
+    r"mesilate|mesylate|tosilate|tosylate|acetate|benzoate|pamoate|embonate|"
+    r"gluconate|lactate|aspartate|edisylate|napadisilate|"
+    r"hydrate|hemihydrate|monohydrate|dihydrate|trihydrate|anhydrous)+$",
+    re.IGNORECASE,
+)
+
+
+def _guess_candidates(raw: str):
+    """添付文書由来の英語名(raw)から、openFDA照合用の候補を優先順に返す。
+
+    末尾の塩・水和物を剥がした中核名(より広くヒット)を先に、剥がす前の正式名を後に置く。
+    両方とも小文字化し、重複は除く。"""
+    if not raw:
+        return []
+    full = re.sub(r"\s+", " ", raw).strip().lower()
+    core = _EN_SALT_RE.sub("", full).strip()
+    out = []
+    for c in (core, full):
+        if c and c not in out:
+            out.append(c)
+    return out
+
+
+def _validate_name(en: str, use_cache: bool = True, polite: bool = True) -> bool:
+    """英語名enがopenFDAに実報告として存在するか（単独報告数>0か）を確認する。
+
+    添付文書からの自動推定名は綴り違い・誤抽出・剥がしすぎがあり得るため、実在しない
+    名前で“それらしい嘘の統計”を出さないよう、採用前にこの実在確認を必ず通す。
+    名前単位でcache/openfda/_val_*.jsonにキャッシュする。"""
+    safe = _escape(en)
+    cache_file = CACHE_DIR / f"_val_{safe}.json"
+    if use_cache and cache_file.exists():
+        try:
+            return json.loads(cache_file.read_text(encoding="utf-8"))["ok"]
+        except Exception:
+            pass
+    cnt = _total(f'patient.drug.medicinalproduct:"{safe}"')
+    ok = cnt > 0
+    cache_file.write_text(json.dumps({"name": en, "count": cnt, "ok": ok}, ensure_ascii=False),
+                          encoding="utf-8")
+    if polite:
+        time.sleep(0.3)
+    return ok
+
+
+def _resolve_english(query: str, matched_name: str, guess: str = None,
+                     use_cache: bool = True, polite: bool = True):
     """検索クエリ→添付文書上の正式名→正式名の中核成分名(severity._name_core)の順に
     drug_name_map.json と照合する。
 
     drug_name_map.json は中核成分名（例: 「アムロジピン」）で登録する運用のため、
     クエリが先発品名（例: 「ノルバスク」）や塩・水和物付きの正式名（例:
     「アムロジピンベシル酸塩」）であっても、正式名を中核名へ正規化することで
-    対応表のエントリに到達できるようにする（配合剤の複合名は中核化されないため
-    対象外＝従来通り fda_name_missing として扱われる）。
+    対応表のエントリに到達できるようにする。
+
+    手動対応表で見つからない場合のフォールバックとして、添付文書から推定した英語名
+    (guess)を openFDA で実在確認(_validate_name)してから採用する。これにより手動
+    メンテに頼らず大半の薬剤をカバーしつつ、実在しない推定名で誤った統計を出すのを防ぐ
+    （確認に通らなければ従来通り None＝fda_name_missing にフォールバック）。
     """
     for candidate in (query, matched_name, severity._name_core(matched_name)):
         en = to_english(candidate) if candidate else None
         if en:
-            return en
+            return en  # 検証済みの手動対応表を最優先
+    for cand in _guess_candidates(guess):
+        if _validate_name(cand, use_cache=use_cache, polite=polite):
+            return cand
     return None
 
 
 def lookup_pair(query_a: str, matched_a: str, query_b: str, matched_b: str,
+                guess_a: str = None, guess_b: str = None,
                 use_cache: bool = True, polite: bool = True):
     """日本語の薬剤名2つ(検索クエリと添付文書上の正式名)から
     openFDA併用報告統計を取得する高レベル関数。
-    drug_name_map.json に対応する英語名が見つからない場合は None を返す。"""
-    en_a = _resolve_english(query_a, matched_a)
-    en_b = _resolve_english(query_b, matched_b)
+
+    guess_a/guess_b には添付文書から推定した英語名(pmda_lookupのenglish_name_guess)を
+    渡せる。手動対応表に無い薬でも、推定名をopenFDAで実在確認できれば統計を取得する。
+    いずれの方法でも英語名が確定できない場合は None を返す。"""
+    en_a = _resolve_english(query_a, matched_a, guess_a, use_cache=use_cache, polite=polite)
+    en_b = _resolve_english(query_b, matched_b, guess_b, use_cache=use_cache, polite=polite)
     if not en_a or not en_b:
         return None
     return co_report_stats(en_a, en_b, use_cache=use_cache, polite=polite)

@@ -228,6 +228,8 @@ def index():
                         fda_stats = openfda_lookup.lookup_pair(
                             query_a, pmda_a.get("matched_name") or query_a,
                             query_b, pmda_b.get("matched_name") or query_b,
+                            guess_a=pmda_a.get("english_name_guess"),
+                            guess_b=pmda_b.get("english_name_guess"),
                             polite=False,
                         )
                     except Exception:

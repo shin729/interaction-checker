@@ -160,6 +160,36 @@ def _pdf_text(session: requests.Session, pdf_url: str, referer: str) -> str:
     return text
 
 
+# 添付文書の「一般的名称」または「一般名」欄には、成分の英語名が（…）で併記されている
+# ことが多い（書式により見出し表記が揺れる）。
+#   例: 「一般的名称 ロスバスタチンカルシウム（Rosuvastatin Calcium）」
+#       「一般名：炭酸リチウム（lithium carbonate）」「一般名：タクロリムス水和物（Tacrolimus Hydrate）」
+# これを拾えば、openFDA(英語名検索)用の英語名を手動対応表に頼らず自動推定できる。
+# （JAN）（日局）等の略号括弧を誤って拾わないよう、小文字を含む語だけを採る。
+_GENERIC_LABEL_RE = re.compile(r"一般(?:的名称|名)")
+_ENG_PAREN_RE = re.compile(r"[（(]\s*([A-Za-z][A-Za-z0-9'’\-\s,\.]{2,}?)\s*[)）]")
+_ENG_ABBR = {"JAN", "USP", "INN", "JP", "USAN", "BAN"}
+
+
+def _extract_english_name(pdf_text: str):
+    """添付文書テキストの「一般的名称/一般名（English）」から英語名を抽出する（無ければNone）。
+
+    見出し表記の揺れ（「一般的名称」「一般名」）に両対応し、PDF抽出順の乱れで最初の
+    出現が空振りすることもあるため、見出しの全出現を順に試し、英語名が取れた時点で返す。
+    抽出されるのは塩・水和物付きの正式英語名（例: "Rosuvastatin Calcium"）の場合があり、
+    openFDA検索向けの中核名への整形・実在確認は openfda_lookup 側で行う。"""
+    if not pdf_text:
+        return None
+    for m in _GENERIC_LABEL_RE.finditer(pdf_text):
+        window = pdf_text[m.start():m.start() + 120].replace("\n", " ")
+        for pm in _ENG_PAREN_RE.finditer(window):
+            cand = pm.group(1).strip()
+            # JAN/日局のような略号や全大文字の規格名は薬剤名ではないので除外
+            if re.search(r"[a-z]", cand) and cand.upper() not in _ENG_ABBR:
+                return cand
+    return None
+
+
 def lookup(drug_name: str, use_cache: bool = True, polite: bool = True) -> dict:
     """
     薬剤名(一般名/販売名の前方一致)から添付文書を検索し、相互作用情報を返す。
@@ -188,7 +218,8 @@ def lookup(drug_name: str, use_cache: bool = True, polite: bool = True) -> dict:
         "query": drug_name, "matched_name": None, "detail_url": None, "pdf_url": None,
         "format": "unknown", "interactions_section": None,
         "contraindicated_combinations": None, "caution_combinations": None,
-        "pk_interactions": None, "if_pdf_url": None, "if_pk_items": [], "found": False,
+        "pk_interactions": None, "if_pdf_url": None, "if_pk_items": [],
+        "english_name_guess": None, "found": False,
     }
 
     with requests.Session() as session:
@@ -206,6 +237,8 @@ def lookup(drug_name: str, use_cache: bool = True, polite: bool = True) -> dict:
             text = _pdf_text(session, pdf_url, detail_url)
             parsed = parse_interactions(text)
             result.update(parsed)
+            # 手動対応表に無い薬でもopenFDAを引けるよう、添付文書から英語名を推定しておく
+            result["english_name_guess"] = _extract_english_name(text)
         # インタビューフォームから定量的PK数値を補完抽出する（任意・失敗時はスキップ）。
         # 相手剤に依存しない全PK文を保存し、照合（相手剤フィルタ）はapp側で行う。
         if if_pdf_url:
