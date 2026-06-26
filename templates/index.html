@@ -57,6 +57,24 @@
   .alt-chip { padding: 0.3rem 0.8rem; border: 1px solid #cfe0f5; background: #eaf2fb; color: #1a5fb4;
               border-radius: 999px; font-size: 0.85rem; cursor: pointer; }
   .alt-chip:hover { background: #d6e6fa; }
+
+  /* 機序からの予測（参考）: 文書化された判定とは別物と分かるよう破線枠＋別色にする */
+  .predict-section { background: #f3f0fb; border: 1px dashed #b9a6e6; border-radius: 10px;
+                     padding: 1rem 1.2rem; margin: 1.2rem 0; }
+  .predict-section h3 { margin-top: 0; }
+  .predict-intro { font-size: 0.82rem; color: #6b5b95; margin-top: -0.3rem; line-height: 1.6; }
+  .predict-item { background: #fff; border: 1px solid #e7e0f5; border-radius: 8px;
+                  padding: 0.6rem 0.9rem; margin: 0.5rem 0; }
+  .predict-head { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; }
+  .predict-chip { display: inline-block; padding: 0.2rem 0.7rem; border-radius: 999px;
+                  font-weight: bold; font-size: 0.85rem; color: #fff; }
+  .predict-強い { background: #c0392b; }
+  .predict-中等度 { background: #e67e22; }
+  .predict-弱い { background: #7f8c8d; }
+  .predict-enzyme { font-size: 0.78rem; color: #6b5b95; background: #ece5fa;
+                    border: 1px solid #d6c9f2; border-radius: 4px; padding: 0.1rem 0.4rem; }
+  .predict-effect { font-size: 0.92rem; color: #333; }
+  .predict-basis { font-size: 0.82rem; color: #777; margin-top: 0.3rem; }
 </style>
 </head>
 <body>
@@ -134,6 +152,27 @@
     {% if result.fda_name_missing %}
       <p class="error">openFDA併用報告データは、薬剤名の英語名対応表(drug_name_map.json)に
       未登録のため取得できませんでした（判定は添付文書情報のみに基づきます）。</p>
+    {% endif %}
+
+    {% if result.predictions %}
+      <div class="predict-section">
+        <h3>🔬 機序からの予測（参考）</h3>
+        <p class="predict-intro">
+          上の判定（添付文書・openFDA実報告に基づく）とは別に、CYP・P-糖蛋白の役割から
+          機械的に推定した参考情報です。<strong>文書化された根拠ではなく、判定には反映していません。</strong>
+          添付文書に記載が無くても機序的に注意すべきペアを補う目的で、実際の影響は用量・患者要因等で異なります。
+        </p>
+        {% for p in result.predictions %}
+          <div class="predict-item">
+            <div class="predict-head">
+              <span class="predict-chip predict-{{ p.level }}">{{ p.level }}{{ p.kind }}</span>
+              <span class="predict-enzyme">{{ p.enzyme }}</span>
+              <span class="predict-effect">{{ p.effect }}</span>
+            </div>
+            <div class="predict-basis">根拠: {{ p.basis }}</div>
+          </div>
+        {% endfor %}
+      </div>
     {% endif %}
 
     <div class="pk-section">

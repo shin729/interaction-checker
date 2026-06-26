@@ -1,0 +1,65 @@
+{
+  "_about": "薬剤ごとのCYP/トランスポーターにおける役割（基質/阻害薬/誘導薬と強さ）の表。両剤の添付文書が相手に言及していなくても、酵素の役割から相互作用を機序的に『予測』するために使う（interaction_predict.py）。FDA医薬品相互作用ガイダンス及びFlockhart表等の確立した分類に基づく代表例。一般名(中核名)で記載。substrate値は『感受性』(影響大の感受性基質)または『基質』。inhibitor/inducer値は『強』『中』『弱』。新薬は随時追記。あくまで予測であり、実際の臨床的影響は個々の状況による点に注意。",
+  "roles": {
+    "クラリスロマイシン": {"inhibitor": {"CYP3A4": "強", "P-gp": "中"}},
+    "エリスロマイシン":   {"inhibitor": {"CYP3A4": "中", "P-gp": "中"}},
+    "イトラコナゾール":   {"inhibitor": {"CYP3A4": "強", "P-gp": "強"}},
+    "ボリコナゾール":     {"inhibitor": {"CYP3A4": "強", "CYP2C19": "強", "CYP2C9": "中"}},
+    "フルコナゾール":     {"inhibitor": {"CYP2C9": "強", "CYP3A4": "中", "CYP2C19": "中"}},
+    "ミコナゾール":       {"inhibitor": {"CYP2C9": "強", "CYP3A4": "中"}},
+    "リトナビル":         {"inhibitor": {"CYP3A4": "強", "P-gp": "強"}},
+    "ジルチアゼム":       {"inhibitor": {"CYP3A4": "中"}, "substrate": {"CYP3A4": "基質"}},
+    "ベラパミル":         {"inhibitor": {"CYP3A4": "中", "P-gp": "中"}, "substrate": {"CYP3A4": "基質"}},
+    "シメチジン":         {"inhibitor": {"CYP3A4": "弱", "CYP2D6": "弱", "CYP1A2": "弱"}},
+    "アミオダロン":       {"inhibitor": {"CYP2C9": "中", "CYP3A4": "弱", "CYP2D6": "中", "P-gp": "中"}},
+    "フルボキサミン":     {"inhibitor": {"CYP1A2": "強", "CYP2C19": "強", "CYP3A4": "弱"}},
+    "パロキセチン":       {"inhibitor": {"CYP2D6": "強"}, "substrate": {"CYP2D6": "基質"}},
+    "シプロフロキサシン": {"inhibitor": {"CYP1A2": "強"}},
+    "グレープフルーツ":   {"inhibitor": {"CYP3A4": "中"}},
+
+    "リファンピシン":     {"inducer": {"CYP3A4": "強", "P-gp": "強", "CYP2C9": "中", "CYP2C19": "中"}},
+    "カルバマゼピン":     {"inducer": {"CYP3A4": "強", "P-gp": "中"}, "substrate": {"CYP3A4": "基質"}},
+    "フェニトイン":       {"inducer": {"CYP3A4": "強", "CYP2C9": "中"}, "substrate": {"CYP2C9": "基質"}},
+    "フェノバルビタール": {"inducer": {"CYP3A4": "強"}},
+
+    "シンバスタチン":     {"substrate": {"CYP3A4": "感受性"}},
+    "アトルバスタチン":   {"substrate": {"CYP3A4": "感受性"}},
+    "ミダゾラム":         {"substrate": {"CYP3A4": "感受性"}},
+    "トリアゾラム":       {"substrate": {"CYP3A4": "感受性"}},
+    "ブロチゾラム":       {"substrate": {"CYP3A4": "基質"}},
+    "タダラフィル":       {"substrate": {"CYP3A4": "感受性"}},
+    "シルデナフィル":     {"substrate": {"CYP3A4": "感受性"}},
+    "スボレキサント":     {"substrate": {"CYP3A4": "感受性"}},
+    "ニフェジピン":       {"substrate": {"CYP3A4": "感受性"}},
+    "アムロジピン":       {"substrate": {"CYP3A4": "基質"}},
+    "タクロリムス":       {"substrate": {"CYP3A4": "感受性", "P-gp": "基質"}},
+    "シクロスポリン":     {"substrate": {"CYP3A4": "感受性", "P-gp": "基質"}, "inhibitor": {"P-gp": "強", "CYP3A4": "弱"}},
+    "クエチアピン":       {"substrate": {"CYP3A4": "基質"}},
+
+    "ワルファリン":       {"substrate": {"CYP2C9": "感受性"}},
+    "セレコキシブ":       {"substrate": {"CYP2C9": "基質"}},
+    "ロサルタン":         {"substrate": {"CYP2C9": "基質", "CYP3A4": "基質"}},
+    "グリメピリド":       {"substrate": {"CYP2C9": "感受性"}},
+
+    "クロピドグレル":     {"substrate": {"CYP2C19": "感受性"}},
+    "オメプラゾール":     {"substrate": {"CYP2C19": "感受性"}, "inhibitor": {"CYP2C19": "中"}},
+    "エスシタロプラム":   {"substrate": {"CYP2C19": "基質"}},
+    "ジアゼパム":         {"substrate": {"CYP2C19": "基質", "CYP3A4": "基質"}},
+
+    "メトプロロール":     {"substrate": {"CYP2D6": "感受性"}},
+    "リスペリドン":       {"substrate": {"CYP2D6": "基質"}},
+    "アリピプラゾール":   {"substrate": {"CYP2D6": "基質", "CYP3A4": "基質"}},
+    "コデイン":           {"substrate": {"CYP2D6": "感受性"}},
+    "トラマドール":       {"substrate": {"CYP2D6": "基質"}},
+
+    "テオフィリン":       {"substrate": {"CYP1A2": "感受性"}},
+    "ラメルテオン":       {"substrate": {"CYP1A2": "感受性"}},
+    "オランザピン":       {"substrate": {"CYP1A2": "基質"}},
+
+    "ジゴキシン":         {"substrate": {"P-gp": "感受性"}},
+    "ダビガトラン":       {"substrate": {"P-gp": "感受性"}},
+    "リバーロキサバン":   {"substrate": {"P-gp": "基質", "CYP3A4": "基質"}},
+    "エドキサバン":       {"substrate": {"P-gp": "基質"}},
+    "アピキサバン":       {"substrate": {"P-gp": "基質", "CYP3A4": "基質"}}
+  }
+}

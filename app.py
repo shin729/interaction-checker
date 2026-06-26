@@ -15,6 +15,7 @@ from flask import Flask, jsonify, render_template, request
 
 import alternatives
 import drug_index
+import interaction_predict
 import mechanism
 import openfda_lookup
 import pk_numbers
@@ -255,6 +256,11 @@ def index():
                     alt_a = alternatives.find_alternatives(pmda_a["matched_name"], exclude=(pmda_b["matched_name"],))
                     alt_b = alternatives.find_alternatives(pmda_b["matched_name"], exclude=(pmda_a["matched_name"],))
 
+                    # CYP/P-糖蛋白の役割からの機序ベース予測（ローカル表のみ＝ネットワーク不要）。
+                    # 添付文書・openFDAに記載が無くても機序的に注意すべきペアを補う。判定(verdict)には
+                    # 一切影響させず、文書化された根拠とは別枠の「参考予測」として表示する。
+                    predictions = interaction_predict.predict(pmda_a["matched_name"], pmda_b["matched_name"])
+
                     result = {
                         "name_a": pmda_a["matched_name"],
                         "name_b": pmda_b["matched_name"],
@@ -265,6 +271,7 @@ def index():
                         "fda_name_missing": fda_stats is None,
                         "alt_a": alt_a,
                         "alt_b": alt_b,
+                        "predictions": predictions,
                     }
 
     return render_template(
