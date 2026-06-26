@@ -14,6 +14,7 @@ import concurrent.futures
 from flask import Flask, jsonify, render_template, request
 
 import alternatives
+import drug_index
 import mechanism
 import openfda_lookup
 import pk_numbers
@@ -186,10 +187,14 @@ def suggest():
     q = request.args.get("q", "").strip()
     if len(q) < 3:
         return jsonify([])
-    try:
-        names = pmda_lookup.suggest(q, polite=False)
-    except Exception:
-        names = []
+    # まずローカル辞書（即時・打ち間違い許容・英語名入力対応）。よく使う薬はPMDA往復なしで返す。
+    # ローカルに無い薬（配合剤ブランド名・辞書未収載の薬）だけPMDA前方一致検索へフォールバック。
+    names = drug_index.local_suggest(q)
+    if not names:
+        try:
+            names = pmda_lookup.suggest(q, polite=False)
+        except Exception:
+            names = []
     return jsonify(names)
 
 
@@ -200,8 +205,10 @@ def index():
     query_a = query_b = ""
 
     if request.method == "POST":
-        query_a = request.form.get("drug_a", "").strip()
-        query_b = request.form.get("drug_b", "").strip()
+        # 英語名で入力された場合は日本語一般名へ正規化する（amlodipine→アムロジピン）。
+        # PMDA検索は日本語名で引くため。完全一致のみ変換し、それ以外はそのまま。
+        query_a = drug_index.resolve_input(request.form.get("drug_a", ""))
+        query_b = drug_index.resolve_input(request.form.get("drug_b", ""))
 
         if not query_a or not query_b:
             error = "薬剤名を2つとも入力してください。"
