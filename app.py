@@ -183,6 +183,42 @@ def _build_evidence(pmda_a, pmda_b, query_a, query_b, fda_stats):
     return items
 
 
+_MAGNITUDE_RANK = {"強い": 3, "中等度": 2, "弱い": 1}
+
+
+def _magnitude(pk_changes):
+    """pk_changes（AUC等の数値変化）から、FDA程度区分が最も強いものを1つ選んで返す。
+
+    判定バッジ（強/中/弱/記載なし）は「どこに記載されたか（禁忌欄/注意欄）」を写すだけで
+    「どれくらいの程度か（AUC何倍か）」を反映していない。これを補うため、取得済みの
+    AUC変化量（pk_numbers が各変化に付与した `fda` 区分）を集約し、相互作用の大きさの
+    目安として判定の横に併記する。判定ロジックには一切影響させない、表示専用の指標。
+    取得済みデータの集計のみ＝追加のネットワーク取得なし＝速度影響なし。
+
+    戻り値: {"tier","kind","value_label","direction","source"} または None（AUC数値なし）
+    """
+    best = None
+    for item in pk_changes or []:
+        for c in item.get("changes", []):
+            fda = c.get("fda")
+            if not fda or c.get("metric") != "AUC":
+                continue
+            tier = next((t for t in _MAGNITUDE_RANK if fda.startswith(t)), None)
+            if tier is None:
+                continue
+            rank = _MAGNITUDE_RANK[tier]
+            if best is None or rank > best["rank"]:
+                best = {
+                    "tier": tier,                                   # 強い / 中等度 / 弱い
+                    "rank": rank,
+                    "kind": "阻害" if "阻害" in fda else ("誘導" if "誘導" in fda else ""),
+                    "value_label": c.get("value_label"),            # 例: 5.1倍
+                    "direction": c.get("direction"),                # 例: 上昇
+                    "source": item.get("source"),
+                }
+    return best
+
+
 @app.route("/suggest")
 def suggest():
     q = request.args.get("q", "").strip()
@@ -272,6 +308,7 @@ def index():
                         "alt_a": alt_a,
                         "alt_b": alt_b,
                         "predictions": predictions,
+                        "magnitude": _magnitude(pk_changes),
                     }
 
     return render_template(

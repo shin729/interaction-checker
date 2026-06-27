@@ -18,6 +18,14 @@
   .level-中 { background: #e67e22; }
   .level-弱 { background: #d4ac0d; color: #333; }
   .level-記載なし { background: #7f8c8d; }
+  /* 程度（AUC倍率ベース）: 判定バッジ(記載区分)とは別の指標と分かるよう、塗りでなく枠線型にする */
+  .magnitude { display: inline-block; padding: 0.3rem 0.7rem; border-radius: 6px; font-size: 0.9rem;
+               font-weight: bold; margin-left: 0.5rem; vertical-align: middle; background: #fff;
+               border: 2px solid; cursor: help; }
+  .magnitude-強い { color: #c0392b; border-color: #c0392b; }
+  .magnitude-中等度 { color: #b9770e; border-color: #e67e22; }
+  .magnitude-弱い { color: #9a7d0a; border-color: #d4ac0d; }
+  .mag-prefix { font-weight: normal; font-size: 0.72rem; color: #999; margin-right: 0.2rem; }
   .reason { color: #555; margin-top: 0.4rem; }
   .evidence-item { border: 1px solid #ddd; border-radius: 8px; padding: 0.8rem 1rem; margin: 0.7rem 0; }
   .evidence-label { font-weight: bold; }
@@ -139,6 +147,12 @@
     <h2>{{ result.name_a }} × {{ result.name_b }}</h2>
     <p>
       <span class="verdict level-{{ result.verdict.level }}">{{ result.verdict.level }}</span>
+      {% if result.magnitude %}
+        <span class="magnitude magnitude-{{ result.magnitude.tier }}"
+              title="添付文書・IFのAUC変化量をFDA基準の程度区分に当てはめた、相互作用の大きさの目安です。左の判定（記載区分）とは別の指標で、判定には反映していません。">
+          <span class="mag-prefix">程度</span>{{ result.magnitude.tier }}{{ result.magnitude.kind }}相当・AUC {{ result.magnitude.value_label }} {{ result.magnitude.direction }}
+        </span>
+      {% endif %}
       {% for m in result.verdict.mechanisms %}
         <span class="mechanism-tag">{{ m }}</span>
       {% endfor %}
