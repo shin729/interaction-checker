@@ -7,7 +7,7 @@
   - 根拠を優先順位付きで表示
     ①openFDA死亡報告 → ②openFDA重篤報告 → ③添付文書併用禁忌 → ④添付文書併用注意
 
-PubMed/CYP分類表の統合は今後の拡張（project_interaction_checker.md参照）。
+CYP分類表（cyp_roles.json）の拡充は今後の課題（project_interaction_checker.md参照）。
 """
 import concurrent.futures
 
