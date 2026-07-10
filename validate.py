@@ -21,7 +21,7 @@ import json
 import sys
 from pathlib import Path
 
-import app
+import checker
 import openfda_lookup
 import pmda_lookup
 import severity
@@ -45,7 +45,7 @@ def _evaluate(pair, use_cache=True):
     fda = openfda_lookup.lookup_pair(
         qa, pa.get("matched_name") or qa, qb, pb.get("matched_name") or qb, use_cache=use_cache)
     verdict = severity.classify(pa, pb, qa, qb, fda)
-    pk = app._build_pk_changes(pa, pb, qa, qb)
+    pk = checker._build_pk_changes(pa, pb, qa, qb)
     return {"level": verdict["level"], "pk": len(pk),
             "ror": fda.get("ror") if fda else None, "note": ""}
 
