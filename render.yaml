@@ -4,4 +4,9 @@ services:
     runtime: python
     plan: free
     buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn app:app --bind 0.0.0.0:$PORT
+    # --threads: openFDAはネットワークI/O待ちが主体なので、1ワーカー内のスレッド並列で
+    #   同時リクエスト（多剤マトリクスの遅延openFDA照会等）をさばく。スレッドはメモリ共有の
+    #   ため無料枠(512MB)でもRAMを増やさない。
+    # --timeout 120: マトリクスのopenFDAバッチ（最大45ペアをサーバ側並列取得）がデフォルト
+    #   30秒のワーカータイムアウトで打ち切られないよう延長する。
+    startCommand: gunicorn app:app --bind 0.0.0.0:$PORT --threads 8 --timeout 120

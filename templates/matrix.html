@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>多剤マトリクス｜薬剤間相互作用チェッカー</title>
+<style>
+  body { font-family: "Segoe UI", "Hiragino Kaku Gothic ProN", Meiryo, sans-serif;
+         max-width: 900px; margin: 2rem auto; padding: 0 1rem; color: #222; }
+  h1 { font-size: 1.35rem; }
+  a { color: #1a5fb4; }
+  .error { color: #b00020; background: #fde8e8; padding: 0.7rem 1rem; border-radius: 6px; }
+  .drug-row { display: flex; gap: 0.4rem; align-items: center; margin: 0.4rem 0; }
+  .drug-input { padding: 0.45rem; font-size: 1rem; flex: 1; min-width: 160px; }
+  .rm-btn { border: none; background: #eee; color: #888; border-radius: 6px; cursor: pointer;
+            width: 2rem; height: 2rem; font-size: 1.1rem; }
+  .rm-btn:hover { background: #f5d0d0; color: #b00020; }
+  button { padding: 0.5rem 1.2rem; font-size: 1rem; cursor: pointer; }
+  .actions { margin: 0.8rem 0 0.2rem; display: flex; gap: 0.6rem; flex-wrap: wrap; }
+  .add-btn { background: #eef4fd; border: 1px solid #cfe0f5; color: #1a5fb4; border-radius: 6px; }
+  .submit-btn { background: #1a5fb4; color: #fff; border: none; border-radius: 6px; }
+
+  /* 判定色（index.html と統一） */
+  .level-強 { background: #c0392b; color: #fff; }
+  .level-中 { background: #e67e22; color: #fff; }
+  .level-弱 { background: #d4ac0d; color: #333; }
+  .level-記載なし { background: transparent; color: #bbb; }
+
+  .not-found { font-size: 0.85rem; color: #8a6d00; background: #fff8e6;
+               border: 1px solid #f0d68a; border-radius: 6px; padding: 0.5rem 0.8rem; margin: 0.8rem 0; }
+
+  .summary { margin: 1rem 0; }
+  .summary h3 { margin-bottom: 0.4rem; }
+  .pair-row { display: flex; align-items: center; gap: 0.6rem; padding: 0.35rem 0; border-bottom: 1px solid #f0f0f0; }
+  .pair-badge { display: inline-block; min-width: 1.6rem; text-align: center; padding: 0.15rem 0.5rem;
+                border-radius: 5px; font-weight: bold; font-size: 0.9rem; }
+  .pair-names { flex: 1; }
+  .pair-names a { text-decoration: none; }
+
+  .matrix-wrap { overflow-x: auto; margin: 1rem 0; }
+  table.matrix { border-collapse: collapse; font-size: 0.9rem; }
+  table.matrix th, table.matrix td { border: 1px solid #e3e3e3; padding: 0; text-align: center; }
+  table.matrix th.row-head { text-align: right; padding: 0.3rem 0.5rem; white-space: nowrap;
+                             background: #fafafa; font-weight: normal; }
+  table.matrix th.col-head { padding: 0.3rem 0.4rem; background: #fafafa; font-weight: normal;
+                             white-space: nowrap; vertical-align: bottom; }
+  table.matrix td.diag { background: #f2f2f2; color: #ccc; }
+  table.matrix td.blank { background: #fff; }
+  .mtx-link { display: block; width: 2.2rem; height: 2.2rem; line-height: 2.2rem; text-decoration: none;
+              font-weight: bold; }
+  .mtx-link.level-記載なし { color: #ccc; }
+  td.pending .mtx-link { position: relative; }
+  td.pending::after { content: "…"; color: #4a90d9; }
+
+  .legend { font-size: 0.82rem; color: #555; margin: 0.6rem 0; display: flex; gap: 0.8rem; flex-wrap: wrap; align-items: center; }
+  .legend span.chip { display: inline-block; padding: 0.1rem 0.5rem; border-radius: 5px; font-weight: bold; }
+  #ofda-status { font-size: 0.82rem; color: #4a90d9; margin: 0.4rem 0; }
+  .note { font-size: 0.8rem; color: #888; margin-top: 2rem; line-height: 1.7; }
+</style>
+</head>
+<body>
+  <h1>🧮 多剤マトリクス相互作用チェック</h1>
+  <p>複数の薬剤名（一般名）を入力すると、全ペアの相互作用を総当たりで表示します。まず添付文書ベースの判定を即座に表示し、openFDA(FAERS)実報告の弱シグナルは後から取得します。</p>
+  <p><a href="/">← 2剤の詳細チェックに戻る</a></p>
+
+  <form method="post" id="matrix-form">
+    <div id="rows"></div>
+    <div class="actions">
+      <button type="button" class="add-btn" id="add-row">＋ 薬を追加</button>
+      <button type="submit" class="submit-btn">マトリクスでチェック</button>
+    </div>
+  </form>
+
+  <script>
+    (function () {
+      var rowCount = 0;
+      var rows = document.getElementById("rows");
+
+      function setupSuggest(input, datalist) {
+        var timer = null;
+        input.addEventListener("input", function () {
+          var q = input.value.trim();
+          if (timer) clearTimeout(timer);
+          if (q.length < 3) { datalist.innerHTML = ""; return; }
+          timer = setTimeout(function () {
+            fetch("/suggest?q=" + encodeURIComponent(q))
+              .then(function (r) { return r.json(); })
+              .then(function (names) {
+                datalist.innerHTML = "";
+                names.forEach(function (name) {
+                  var opt = document.createElement("option");
+                  opt.value = name;
+                  datalist.appendChild(opt);
+                });
+              })
+              .catch(function () { datalist.innerHTML = ""; });
+          }, 400);
+        });
+      }
+
+      function makeRow(value) {
+        rowCount++;
+        var id = "dl-" + rowCount;
+        var wrap = document.createElement("div");
+        wrap.className = "drug-row";
+        var input = document.createElement("input");
+        input.type = "text"; input.name = "drugs"; input.className = "drug-input";
+        input.setAttribute("list", id); input.autocomplete = "off";
+        input.placeholder = "例: ワルファリン";
+        if (value) input.value = value;
+        var dl = document.createElement("datalist"); dl.id = id;
+        var rm = document.createElement("button");
+        rm.type = "button"; rm.className = "rm-btn"; rm.textContent = "×";
+        rm.title = "この行を削除";
+        rm.onclick = function () { wrap.remove(); };
+        wrap.appendChild(input); wrap.appendChild(dl); wrap.appendChild(rm);
+        rows.appendChild(wrap);
+        setupSuggest(input, dl);
+      }
+
+      // 初期は4行。送信済みなら入力を復元する（見つかった薬＋見つからなかった入力）。
+      var initial = {% if data and not data.error %}{{ ((data.drugs|map(attribute='input')|list) + data.not_found)|tojson }}{% else %}[]{% endif %};
+      var n = Math.max(4, initial.length);
+      for (var i = 0; i < n; i++) { makeRow(initial[i] || ""); }
+      document.getElementById("add-row").addEventListener("click", function () { makeRow(""); });
+    })();
+  </script>
+
+  {% if data %}
+    {% if data.error %}
+      <p class="error">{{ data.error }}</p>
+    {% else %}
+      {% if data.not_found %}
+        <p class="not-found">⚠ 添付文書が見つからなかったため除外しました:
+          {{ data.not_found|join('、') }}（一般名を確認してください）</p>
+      {% endif %}
+
+      {% if data.n >= 2 %}
+        <div class="legend">
+          <span>凡例:</span>
+          <span class="chip level-強">強</span> 併用禁忌
+          <span class="chip level-中">中</span> 併用注意
+          <span class="chip level-弱">弱</span> openFDA実報告シグナル
+          <span style="color:#bbb">·</span> 記載なし
+        </div>
+
+        {% if data.notable %}
+          <div class="summary">
+            <h3>⚠ 注意すべきペア（{{ data.notable|length }}件・重要度順）</h3>
+            {% for c in data.notable %}
+              <div class="pair-row">
+                <span class="pair-badge level-{{ c.level }}">{{ c.level }}</span>
+                <span class="pair-names">
+                  <a href="/?a={{ c.a|urlencode }}&b={{ c.b|urlencode }}" target="_blank">{{ c.a_name }} × {{ c.b_name }}</a>
+                </span>
+              </div>
+            {% endfor %}
+          </div>
+        {% else %}
+          <p>添付文書ベースでは、強（禁忌）・中（注意）のペアは見つかりませんでした。</p>
+        {% endif %}
+
+        <div id="ofda-status"></div>
+
+        <div class="matrix-wrap">
+          <table class="matrix">
+            <tr>
+              <th></th>
+              {% for d in data.drugs %}<th class="col-head">{{ d.name }}</th>{% endfor %}
+            </tr>
+            {% for r in range(data.n) %}
+              <tr>
+                <th class="row-head">{{ data.drugs[r].name }}</th>
+                {% for c in range(data.n) %}
+                  {% if c < r %}
+                    <td class="blank"></td>
+                  {% elif c == r %}
+                    <td class="diag">—</td>
+                  {% else %}
+                    {% set cell = data.grid_map.get(r ~ '-' ~ c) %}
+                    <td id="cell-{{ r }}-{{ c }}"{% if cell.needs_openfda %} class="pending"{% endif %}>
+                      <a class="mtx-link level-{{ cell.level }}"
+                         href="/?a={{ cell.a|urlencode }}&b={{ cell.b|urlencode }}" target="_blank"
+                         title="{{ cell.a_name }} × {{ cell.b_name }}：{{ cell.reason }}">{{ '·' if cell.level == '記載なし' else cell.level }}</a>
+                    </td>
+                  {% endif %}
+                {% endfor %}
+              </tr>
+            {% endfor %}
+          </table>
+        </div>
+
+        <script>
+          // openFDA遅延取得: 記載なしセルだけをサーバへまとめて投げ、サーバ側で並列取得する。
+          (function () {
+            var need = {{ data.need_pairs|tojson }};
+            var statusEl = document.getElementById("ofda-status");
+            if (!need.length) { return; }
+            statusEl.textContent = "openFDA(FAERS)実報告を照会中…（" + need.length + "ペア・数秒〜十数秒）";
+            fetch("/matrix/openfda", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(need)
+            })
+              .then(function (r) { return r.json(); })
+              .then(function (results) {
+                var upgraded = 0;
+                results.forEach(function (res) {
+                  var td = document.getElementById("cell-" + res.a_idx + "-" + res.b_idx);
+                  if (td) { td.classList.remove("pending"); }
+                  if (res.level === "弱" && td) {
+                    var link = td.querySelector(".mtx-link");
+                    if (link) {
+                      link.className = "mtx-link level-弱";
+                      link.textContent = "弱";
+                      var ror = (res.ror != null) ? "（ROR " + res.ror + "）" : "";
+                      link.title = link.title.split("：")[0] + "：openFDA併用報告に相互作用シグナル" + ror;
+                    }
+                    upgraded++;
+                  }
+                });
+                statusEl.textContent = upgraded
+                  ? ("openFDA照会完了: " + upgraded + "件の「弱」シグナルを追加しました（グリッド参照）。")
+                  : "openFDA照会完了: 追加の弱シグナルはありませんでした。";
+              })
+              .catch(function () { statusEl.textContent = "openFDAの照会に失敗しました（添付文書ベースの判定は有効です）。"; });
+          })();
+        </script>
+      {% endif %}
+    {% endif %}
+  {% endif %}
+
+  <p class="note">
+    ※ グリッドはまず添付文書ベース（強＝禁忌／中＝注意）で即時表示し、「弱」はopenFDA実報告から遅延で追加します。<br>
+    ※ セルまたは注意ペアをクリックすると、その2剤の詳細（数値変化・根拠・機序予測）を別タブで開きます。<br>
+    ※ 添付文書は「報告・検討された組み合わせ」のみを列挙するため、記載なし＝安全を意味しません。<br>
+    ※ 本ツールは医療従事者の判断を代替しません。実際の処方判断は医師・薬剤師にご相談ください。
+  </p>
+</body>
+</html>

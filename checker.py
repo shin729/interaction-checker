@@ -297,3 +297,126 @@ def check_interaction(raw_a, raw_b):
         "magnitude": _magnitude(pk_changes),
     }
     return {"result": result, "error": None, "query_a": query_a, "query_b": query_b}
+
+
+# ---- 多剤併用マトリクス（添付文書ベースを即時表示、openFDAは遅延取得）----
+
+# 一度にチェックできる薬剤数の上限。ペア数は N(N-1)/2 で増えるため、openFDA遅延取得の
+# 最悪時間を現実的に抑える目的で上限を設ける（10剤＝45ペア）。
+MATRIX_MAX_DRUGS = 10
+
+
+def check_matrix(raw_names):
+    """複数薬剤の総当たり相互作用マトリクスを組み立てる。
+
+    ペアの重い部分（openFDA併用報告の通信＝1ペア約2.5秒）は含めず、添付文書ベースの判定
+    （強/中/記載なし）だけを即座に返す。openFDAでしか出ない「弱」は、記載なしセルに対して
+    matrix_openfda_signals() で遅延取得する（needs_openfda=True のセルが対象）。
+
+    戻り値: {
+      "drugs":     [{"input","name","found"}...],   # 添付文書が見つかった薬（重複排除後）
+      "not_found": [str...],                          # 見つからなかった入力
+      "cells":     [{"a_idx","b_idx","a","b","a_name","b_name","level","reason","needs_openfda"}...],
+      "n":         見つかった薬の数,
+      "error":     str|None,
+    }
+    """
+    # 英語名正規化・空除去・重複排除（入力順を保つ）
+    names, seen = [], set()
+    for raw in raw_names or []:
+        q = drug_index.resolve_input((raw or "").strip())
+        if q and q not in seen:
+            seen.add(q)
+            names.append(q)
+
+    if len(names) < 2:
+        return {"drugs": [], "not_found": [], "cells": [], "n": 0,
+                "error": "薬剤名を2つ以上入力してください。"}
+    if len(names) > MATRIX_MAX_DRUGS:
+        return {"drugs": [], "not_found": [], "cells": [], "n": 0,
+                "error": f"一度にチェックできるのは{MATRIX_MAX_DRUGS}剤までです"
+                         f"（{len(names)}剤が入力されました）。数を減らしてください。"}
+
+    # 添付文書は薬ごとに1回だけ取得（ペアごとではない）。互いに独立なので並列化する。
+    with concurrent.futures.ThreadPoolExecutor(max_workers=min(len(names), 8)) as ex:
+        infos = list(ex.map(
+            lambda q: pmda_lookup.lookup(q, use_cache=True, polite=False), names))
+
+    found, found_infos, not_found = [], [], []
+    for q, info in zip(names, infos):
+        if info.get("found"):
+            found.append({"input": q, "name": info.get("matched_name") or q, "found": True})
+            found_infos.append(info)
+        else:
+            not_found.append(q)
+
+    cells = []
+    for a in range(len(found)):
+        for b in range(a + 1, len(found)):
+            qa, qb = found[a]["input"], found[b]["input"]
+            # openFDAは遅延取得のため、ここでは fda_stats=None で添付文書のみから判定する。
+            verdict = severity.classify(found_infos[a], found_infos[b], qa, qb, None)
+            level = verdict["level"]
+            cells.append({
+                "a_idx": a, "b_idx": b, "a": qa, "b": qb,
+                "a_name": found[a]["name"], "b_name": found[b]["name"],
+                "level": level, "reason": verdict["reason"],
+                # openFDAで「弱」に上がりうるのは添付文書に記載が無い（記載なし）ペアだけ。
+                # 強/中は既に文書化済みなので遅延取得の対象にしない（無駄な通信を省く）。
+                "needs_openfda": level == "記載なし",
+            })
+
+    return {"drugs": found, "not_found": not_found, "cells": cells,
+            "n": len(found), "error": None}
+
+
+def pair_openfda_signal(raw_a, raw_b):
+    """1ペアのopenFDA弱シグナルを取得する（マトリクスの記載なしセルを遅延で埋める用）。
+
+    添付文書ベースで既に強/中と判定済みのペアには呼ばない前提。openFDA併用報告に
+    相互作用シグナル（DRUG INTERACTION等）があれば「弱」、無ければ「記載なし」を返す。
+
+    戻り値: {"level": "弱"|"記載なし", "ror": float|None, "available": bool}
+    """
+    query_a = drug_index.resolve_input((raw_a or "").strip())
+    query_b = drug_index.resolve_input((raw_b or "").strip())
+    pa = pmda_lookup.lookup(query_a, use_cache=True, polite=False)
+    pb = pmda_lookup.lookup(query_b, use_cache=True, polite=False)
+    if not pa.get("found") or not pb.get("found"):
+        return {"level": "記載なし", "ror": None, "available": False}
+    try:
+        fda_stats = openfda_lookup.lookup_pair(
+            query_a, pa.get("matched_name") or query_a,
+            query_b, pb.get("matched_name") or query_b,
+            guess_a=pa.get("english_name_guess"), guess_b=pb.get("english_name_guess"),
+            polite=False)
+    except Exception:
+        fda_stats = None
+    signal = severity._openfda_signal(fda_stats)
+    if signal:
+        return {"level": "弱", "ror": signal.get("ror"), "available": True}
+    return {"level": "記載なし",
+            "ror": fda_stats.get("ror") if fda_stats else None,
+            "available": fda_stats is not None}
+
+
+def matrix_openfda_signals(pairs):
+    """マトリクスの複数ペアについてopenFDA弱シグナルをまとめて取得する。
+
+    ペアごとのopenFDA通信は互いに独立なので、サーバ側でスレッド並列化する（gunicornの
+    ワーカー数に依存せず1リクエスト内で並列取得できる）。openFDAはネットワークI/O待ちが
+    主体でGILが解放されるため、スレッド並列がそのまま効く。
+
+    引数 pairs: [{"a","b","a_idx","b_idx"}...]（check_matrix の needs_openfda セル）
+    戻り値:     [{"a_idx","b_idx","level","ror","available"}...]
+    """
+    pairs = (pairs or [])[:MATRIX_MAX_DRUGS * (MATRIX_MAX_DRUGS - 1) // 2]  # 上限ペア数で安全弁
+    if not pairs:
+        return []
+
+    def _one(p):
+        sig = pair_openfda_signal(p.get("a", ""), p.get("b", ""))
+        return {"a_idx": p.get("a_idx"), "b_idx": p.get("b_idx"), **sig}
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=8) as ex:
+        return list(ex.map(_one, pairs))

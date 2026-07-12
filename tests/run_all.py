@@ -17,13 +17,14 @@ try:
 except Exception:
     pass
 
+import test_matrix
 import test_parsers
 import test_pure
 
 
 def main():
     rc = 0
-    for mod in (test_pure, test_parsers):
+    for mod in (test_pure, test_parsers, test_matrix):
         rc |= mod.main()
     print("\n" + "=" * 70)
     print("[全体] " + ("すべて通過" if rc == 0 else "失敗あり（上記参照）"))
