@@ -97,6 +97,17 @@ def test_predict():
         check("強いCYP3A4阻害を予測", (p["level"], p["kind"], p["enzyme"]), ("強い", "阻害", "CYP3A4"))
     check("役割表に無いペアは空", interaction_predict.predict("zz1", "zz2"), [])
 
+    # 拡充データの重要ペア（コルヒチン+マクロライドは潜在的に致死的な古典的相互作用）
+    cp = {(p["level"], p["enzyme"]) for p in interaction_predict.predict("コルヒチン", "クラリスロマイシン")}
+    check_true("コルヒチン×クラリス: 強いCYP3A4阻害を予測", ("強い", "CYP3A4") in cp)
+    check_true("コルヒチン×クラリス: P-gp阻害も予測", any(e == "P-gp" for _, e in cp))
+    tk = interaction_predict.predict("チカグレロル", "イトラコナゾール")
+    check_true("チカグレロル×イトラコナゾール: 強いCYP3A4阻害",
+               any(p["level"] == "強い" and p["enzyme"] == "CYP3A4" for p in tk))
+    dg = interaction_predict.predict("ジゴキシン", "ジルチアゼム")
+    check_true("ジゴキシン×ジルチアゼム: P-gp阻害を予測（ジルチアゼムP-gp追加）",
+               any(p["enzyme"] == "P-gp" for p in dg))
+
 
 def test_magnitude():
     print("\n[checker._magnitude] AUC変化から最大の程度区分を1つ選ぶ（表示専用）")
@@ -116,12 +127,40 @@ def test_magnitude():
     check("Noneを渡してもNone", checker._magnitude(None), None)
 
 
+def test_cyp_roles_integrity():
+    print("\n[cyp_roles.json / drug_name_map.json] 知識テーブルの整合性")
+    import json
+    root = Path(__file__).resolve().parent.parent
+    roles = json.loads((root / "cyp_roles.json").read_text(encoding="utf-8"))["roles"]
+    nmap = json.loads((root / "drug_name_map.json").read_text(encoding="utf-8"))
+    check_true("cyp_rolesは50薬以上", len(roles) >= 50)
+    # プレフィックス衝突: あるキーが別キーの接頭辞だと _roles_for(前方一致)で誤シャドウしうる
+    keys = list(roles.keys())
+    collisions = [(a, b) for a in keys for b in keys if a != b and b.startswith(a)]
+    check("キーのプレフィックス衝突なし", collisions, [])
+    # 予測できる薬はopenFDA照会もできるべき（食品のグレープフルーツのみ例外）
+    missing = [k for k in roles if k not in nmap and k != "グレープフルーツ"]
+    check("cyp_roles薬は全てname_mapにある(食品除く)", missing, [])
+    # 値の妥当性: substrateは感受性/基質、inhibitor/inducerは強/中/弱のみ
+    bad = []
+    for name, r in roles.items():
+        for v in (r.get("substrate") or {}).values():
+            if v not in ("感受性", "基質"):
+                bad.append((name, "substrate", v))
+        for role in ("inhibitor", "inducer"):
+            for v in (r.get(role) or {}).values():
+                if v not in ("強", "中", "弱"):
+                    bad.append((name, role, v))
+    check("役割値は既定の語彙のみ", bad, [])
+
+
 def main():
     print("=" * 70)
     print("純粋関数の単体テスト（オフライン）")
     print("=" * 70)
     for fn in (test_name_core, test_split_combo, test_expand_names, test_text_mentions,
-               test_resolve_input, test_local_suggest, test_predict, test_magnitude):
+               test_resolve_input, test_local_suggest, test_predict, test_magnitude,
+               test_cyp_roles_integrity):
         fn()
     print("\n" + "-" * 70)
     if _failures:
