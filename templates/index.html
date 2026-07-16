@@ -83,6 +83,17 @@
                     border: 1px solid #d6c9f2; border-radius: 4px; padding: 0.1rem 0.4rem; }
   .predict-effect { font-size: 0.92rem; color: #333; }
   .predict-basis { font-size: 0.82rem; color: #777; margin-top: 0.3rem; }
+
+  /* 薬力学的(PD)な相加リスク: PK予測とは別軸の「相加で危険」型。警告色の実線枠で目立たせる */
+  .pd-section { background: #fdf0ee; border: 1px solid #e6a79c; border-radius: 10px;
+                padding: 1rem 1.2rem; margin: 1.2rem 0; }
+  .pd-section h3 { margin-top: 0; }
+  .pd-intro { font-size: 0.82rem; color: #a05a4c; margin-top: -0.3rem; line-height: 1.6; }
+  .pd-item { background: #fff; border: 1px solid #f0d5d0; border-radius: 8px;
+             padding: 0.6rem 0.9rem; margin: 0.5rem 0; }
+  .pd-flag { display: inline-block; padding: 0.2rem 0.7rem; border-radius: 6px; font-weight: bold;
+             font-size: 0.9rem; color: #fff; background: #c0392b; margin-bottom: 0.3rem; }
+  .pd-concern { font-size: 0.9rem; color: #444; line-height: 1.6; }
 </style>
 </head>
 <body>
@@ -167,6 +178,22 @@
     {% if result.fda_name_missing %}
       <p class="error">openFDA併用報告データは、薬剤名の英語名対応表(drug_name_map.json)に
       未登録のため取得できませんでした（判定は添付文書情報のみに基づきます）。</p>
+    {% endif %}
+
+    {% if result.pd_warnings %}
+      <div class="pd-section">
+        <h3>⚠ 併用による相加的リスク（薬力学・参考）</h3>
+        <p class="pd-intro">
+          両剤が「同じ方向の作用」を持つために、併用で相加的に強まりうるリスクです（PK＝血中濃度上昇とは別の軸）。
+          <strong>スクリーニングであり、判定には反映していません。</strong>実際の危険度は用量・投与経路・患者要因（電解質・腎機能・年齢等）で異なります。
+        </p>
+        {% for w in result.pd_warnings %}
+          <div class="pd-item">
+            <span class="pd-flag">{{ w.label }}</span>
+            <div class="pd-concern">{{ w.concern }}</div>
+          </div>
+        {% endfor %}
+      </div>
     {% endif %}
 
     {% if result.predictions %}

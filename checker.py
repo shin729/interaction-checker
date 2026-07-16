@@ -17,6 +17,7 @@ import drug_index
 import interaction_predict
 import mechanism
 import openfda_lookup
+import pd_interactions
 import pk_numbers
 import pmda_lookup
 import severity
@@ -283,6 +284,11 @@ def check_interaction(raw_a, raw_b):
     # 一切影響させず、文書化された根拠とは別枠の「参考予測」として表示する。
     predictions = interaction_predict.predict(pmda_a["matched_name"], pmda_b["matched_name"])
 
+    # 薬力学的(PD)な相加リスク（QT延長・セロトニン・出血・中枢抑制・高カリウム・抗コリン）。
+    # PK予測とは別軸で、両剤が同じ方向の作用を持つときに相加的な危険を警告する。
+    # 機序予測と同じくローカル表のみ・判定には非反映の「参考」枠。
+    pd_warnings = pd_interactions.predict(pmda_a["matched_name"], pmda_b["matched_name"])
+
     result = {
         "name_a": pmda_a["matched_name"],
         "name_b": pmda_b["matched_name"],
@@ -294,6 +300,7 @@ def check_interaction(raw_a, raw_b):
         "alt_a": alt_a,
         "alt_b": alt_b,
         "predictions": predictions,
+        "pd_warnings": pd_warnings,
         "magnitude": _magnitude(pk_changes),
     }
     return {"result": result, "error": None, "query_a": query_a, "query_b": query_b}
@@ -366,8 +373,11 @@ def check_matrix(raw_names):
                 "needs_openfda": level == "記載なし",
             })
 
+    # 処方全体の薬力学的な相加リスク群（同じPDフラグを持つ薬が2剤以上）。
+    pd_groups = pd_interactions.group_shared([d["name"] for d in found])
+
     return {"drugs": found, "not_found": not_found, "cells": cells,
-            "n": len(found), "error": None}
+            "n": len(found), "pd_groups": pd_groups, "error": None}
 
 
 def pair_openfda_signal(raw_a, raw_b):

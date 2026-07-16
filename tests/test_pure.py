@@ -25,6 +25,7 @@ except Exception:
 import checker
 import drug_index
 import interaction_predict
+import pd_interactions
 import severity
 
 _failures = []
@@ -154,13 +155,52 @@ def test_cyp_roles_integrity():
     check("役割値は既定の語彙のみ", bad, [])
 
 
+def test_pd_interactions():
+    print("\n[pd_interactions.predict] 薬力学的な相加リスクの共有フラグ検出")
+
+    def flags(a, b):
+        return {w["flag"] for w in pd_interactions.predict(a, b)}
+
+    check_true("QT×QT: クラリス×ハロペリドール", "QT延長" in flags("クラリスロマイシン", "ハロペリドール"))
+    check_true("セロトニン: セルトラリン×トラマドール", "セロトニン" in flags("セルトラリン", "トラマドール"))
+    check_true("出血: ワルファリン×ロキソプロフェン", "出血" in flags("ワルファリン", "ロキソプロフェン"))
+    check_true("中枢抑制: オキシコドン×アルプラゾラム", "中枢抑制" in flags("オキシコドン", "アルプラゾラム"))
+    check_true("高カリウム: エナラプリル×スピロノラクトン", "高カリウム" in flags("エナラプリル", "スピロノラクトン"))
+    check("相加リスクなし: アムロジピン×アトルバスタチン", pd_interactions.predict("アムロジピン", "アトルバスタチン"), [])
+    check("塩付き名でも引ける(ワルファリンカリウム)", pd_interactions._flags_for("ワルファリンカリウム"), {"出血"})
+
+    print("\n[pd_interactions.group_shared] 多剤で2剤以上が共有するフラグ群")
+    groups = pd_interactions.group_shared(["クラリスロマイシン", "ハロペリドール", "エスシタロプラム", "アムロジピン"])
+    qt = next((g for g in groups if g["flag"] == "QT延長"), None)
+    check_true("QT延長群が検出される", qt is not None)
+    if qt:
+        check("QT延長は3剤該当", sorted(qt["members"]), sorted(["クラリスロマイシン", "ハロペリドール", "エスシタロプラム"]))
+    check("共有が無ければ空", pd_interactions.group_shared(["アムロジピン", "アトルバスタチン"]), [])
+
+
+def test_pd_risks_integrity():
+    print("\n[pd_risks.json] 知識テーブルの整合性")
+    import json
+    root = Path(__file__).resolve().parent.parent
+    raw = json.loads((root / "pd_risks.json").read_text(encoding="utf-8"))
+    risks = raw["risks"]
+    check_true("リスク分類が5種以上", len(risks) >= 5)
+    bad = [f for f, info in risks.items()
+           if not (info.get("label") and info.get("concern") and info.get("drugs"))]
+    check("各リスクにlabel/concern/drugsがある", bad, [])
+    # プレフィックス衝突（_flags_forの前方一致で誤マッチしうる）
+    drugs = sorted({d for info in risks.values() for d in info["drugs"]})
+    collisions = [(a, b) for a in drugs for b in drugs if a != b and b.startswith(a)]
+    check("薬剤キーのプレフィックス衝突なし", collisions, [])
+
+
 def main():
     print("=" * 70)
     print("純粋関数の単体テスト（オフライン）")
     print("=" * 70)
     for fn in (test_name_core, test_split_combo, test_expand_names, test_text_mentions,
                test_resolve_input, test_local_suggest, test_predict, test_magnitude,
-               test_cyp_roles_integrity):
+               test_cyp_roles_integrity, test_pd_interactions, test_pd_risks_integrity):
         fn()
     print("\n" + "-" * 70)
     if _failures:

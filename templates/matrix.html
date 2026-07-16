@@ -55,6 +55,14 @@
   .legend { font-size: 0.82rem; color: #555; margin: 0.6rem 0; display: flex; gap: 0.8rem; flex-wrap: wrap; align-items: center; }
   .legend span.chip { display: inline-block; padding: 0.1rem 0.5rem; border-radius: 5px; font-weight: bold; }
   #ofda-status { font-size: 0.82rem; color: #4a90d9; margin: 0.4rem 0; }
+  .pd-groups { margin: 1rem 0; }
+  .pd-groups h3 { margin-bottom: 0.4rem; }
+  .pd-group { background: #fdf0ee; border: 1px solid #e6a79c; border-radius: 8px;
+              padding: 0.6rem 0.9rem; margin: 0.5rem 0; }
+  .pd-group .pd-flag { display: inline-block; padding: 0.15rem 0.6rem; border-radius: 6px;
+                       font-weight: bold; font-size: 0.85rem; color: #fff; background: #c0392b; }
+  .pd-group .pd-members { font-weight: bold; color: #7a2e22; margin: 0.3rem 0; }
+  .pd-group .pd-concern { font-size: 0.83rem; color: #555; line-height: 1.6; }
   .note { font-size: 0.8rem; color: #888; margin-top: 2rem; line-height: 1.7; }
 </style>
 </head>
@@ -158,6 +166,22 @@
           </div>
         {% else %}
           <p>添付文書ベースでは、強（禁忌）・中（注意）のペアは見つかりませんでした。</p>
+        {% endif %}
+
+        {% if data.pd_groups %}
+          <div class="pd-groups">
+            <h3>⚠ 処方全体の相加的リスク（薬力学・参考）</h3>
+            <p style="font-size:0.82rem; color:#a05a4c; margin-top:-0.2rem;">
+              同じ方向の作用を持つ薬が処方内に2剤以上あり、相加的にリスクが積み上がる可能性があります（判定には非反映のスクリーニング）。
+            </p>
+            {% for g in data.pd_groups %}
+              <div class="pd-group">
+                <span class="pd-flag">{{ g.label }}</span>
+                <div class="pd-members">該当 {{ g.members|length }}剤: {{ g.members|join('、') }}</div>
+                <div class="pd-concern">{{ g.concern }}</div>
+              </div>
+            {% endfor %}
+          </div>
         {% endif %}
 
         <div id="ofda-status"></div>
